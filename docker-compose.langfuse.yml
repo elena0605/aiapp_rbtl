@@ -1,0 +1,54 @@
+services:
+  langfuse-db:
+    image: postgres:14
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: langfuse
+      POSTGRES_DB: langfuse
+    ports:
+      - "5433:5432"
+    volumes:
+      - langfuse-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langfuse -d langfuse"]
+      interval: 5s
+      retries: 10
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3
+    restart: always
+    environment:
+      CLICKHOUSE_USER: langfuse
+      CLICKHOUSE_PASSWORD: langfuse
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - langfuse-ch:/var/lib/clickhouse
+
+  langfuse:
+    image: langfuse/langfuse:latest
+    depends_on:
+      langfuse-db:
+        condition: service_healthy
+      clickhouse:
+        condition: service_started
+    ports:
+      - "3001:3000"
+    environment:
+      DATABASE_URL: postgresql://langfuse:langfuse@langfuse-db:5432/langfuse
+      NEXTAUTH_SECRET: "0123456789abcdef0123456789abcdef"
+      ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef"
+      SALT: "0123456789abcdef0123456789abcdef"
+      NEXTAUTH_URL: http://localhost:3001
+      # ClickHouse configuration for full analytics
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: 9000
+      CLICKHOUSE_USER: langfuse
+      CLICKHOUSE_PASSWORD: langfuse
+      TELEMETRY_ENABLED: "false"
+
+volumes:
+  langfuse-pg:
+  langfuse-ch:

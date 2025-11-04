@@ -1,0 +1,24 @@
+# GraphRAG Project Dependencies
+# This file should be placed in the new graphrag/ project root
+
+# Neo4j Database Driver
+neo4j>=5.7
+
+# Langfuse - LLM Observability & Prompt Management
+langfuse>=3.0.0
+
+# OpenAI SDK (for standard OpenAI API)
+openai>=1.0.0
+
+# OR use Azure OpenAI (choose one):
+# azure-openai>=1.0.0
+
+# Environment Variables
+python-dotenv>=1.0.0
+
+# YAML Parsing (for prompts, terminology, examples)
+pyyaml>=6.0
+
+# Optional: For type hints (recommended)
+typing-extensions>=4.0.0
+

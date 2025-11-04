@@ -1,0 +1,35 @@
+id: graph.result_summarizer
+version: 1
+description: Summarize Cypher query results into a conversational answer for the user.
+tags: [graph, summarization, results]
+params:
+  temperature: 0.0
+  max_tokens: 600
+
+variables:
+  - name: question
+    description: The original user question
+  - name: cypher
+    description: The Cypher query that was executed
+  - name: results
+    description: JSON string of the first 10 rows of query results
+
+template: |
+  You are a helpful data analyst. Answer the user's question using the query 
+  results below. Be concise, conversational, and avoid code. If numeric, format 
+  with commas. If tabular, show a compact markdown table (max 10 rows).
+
+  Question: {{ question }}
+
+  Cypher Used:
+  {{ cypher }}
+
+  Results (first 10 rows):
+  {{ results }}
+
+  Provide the answer now.
+
+metadata:
+  owner: ai-team
+  created_at: 2025-11-04
+

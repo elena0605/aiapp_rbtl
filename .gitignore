@@ -1,0 +1,51 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# Environment variables
+.env
+.env.local
+
+# Schema cache
+ai/schema/schema.txt
+
+# Neo4j scripts
+neo4j_scripts/venv/
+neo4j_scripts/__pycache__/
+neo4j_scripts/*.pyc
+neo4j_scripts/*.log
+neo4j_scripts/*.tmp
+neo4j_scripts/.DS_Store
+neo4j_scripts/csv_files/
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+
+# Docker volumes (if stored locally)
+docker-volumes/
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.swp
+*~
+
