@@ -209,7 +209,6 @@ rbtl_graphrag/
 │   └── text_to_cypher.py # Main entry point
 ├── docker-compose.langfuse.yml  # Langfuse Docker setup
 ├── requirements.txt      # Python dependencies
-├── TESTING_GUIDE.md     # Setup and testing guide
 └── utils_neo4j.py       # Neo4j connection utilities
 ```
 
