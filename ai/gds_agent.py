@@ -20,16 +20,23 @@ async def main():
     print("Connecting to Neo4j GDS Agent MCP server...")
     
     # Create client (uses Neo4j credentials from .env)
+    print("Creating Neo4jGDSAgentClient...")
     client = Neo4jGDSAgentClient()
+    print("✓ Client created")
     
     try:
         # Connect to the MCP server
+        print("Calling client.connect()...")
         await client.connect()
         print("✓ Connected to GDS Agent")
         
         # List available tools
-        print("\nAvailable tools:")
+        print("\nRequesting available tools...")
+        print("Calling client.list_tools()...")
         tools = await client.list_tools()
+        print(f"✓ Received {len(tools)} tools")
+        
+        print("\nAvailable tools:")
         for tool in tools:
             print(f"  - {tool.name}")
             if tool.description:

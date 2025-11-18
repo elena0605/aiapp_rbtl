@@ -2,6 +2,11 @@
 
 This module shows how to use the Neo4j GDS Agent MCP client alongside
 the GraphRAG text-to-cypher functionality.
+
+NOTE: This module is currently non-functional due to a bug in gds-agent where
+the MCP server doesn't send initialization messages. See MCP_ARCHITECTURE.md
+for details. This is kept as a reference for future integration once the
+gds-agent issue is resolved.
 """
 
 from __future__ import annotations

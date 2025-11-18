@@ -1,0 +1,40 @@
+# FastAPI Backend Dependencies
+
+# FastAPI and server
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+websockets>=12.0
+python-multipart>=0.0.6
+
+# Existing project dependencies (from root requirements.txt)
+# Neo4j
+neo4j>=5.28.1
+
+# Langfuse
+langfuse>=3.0.0
+
+# OpenAI
+openai>=1.0.0
+
+# Environment variables
+python-dotenv>=1.0.0
+
+# YAML parsing
+pyyaml>=6.0
+
+# Vector operations
+numpy>=1.24.0
+
+# Type hints
+typing-extensions>=4.0.0
+
+# MCP (if needed)
+mcp[cli]>=1.11.0
+graphdatascience>=1.16
+
+# Pydantic for validation
+pydantic>=2.0.0
+
+# MongoDB
+pymongo>=4.6.0
+

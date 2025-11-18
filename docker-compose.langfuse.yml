@@ -43,10 +43,7 @@ services:
       SALT: "0123456789abcdef0123456789abcdef"
       NEXTAUTH_URL: http://localhost:3001
       # ClickHouse configuration for full analytics
-      CLICKHOUSE_HOST: clickhouse
-      CLICKHOUSE_PORT: 9000
-      CLICKHOUSE_USER: langfuse
-      CLICKHOUSE_PASSWORD: langfuse
+      CLICKHOUSE_URL: clickhouse://langfuse:langfuse@clickhouse:9000/default
       TELEMETRY_ENABLED: "false"
 
 volumes:

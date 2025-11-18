@@ -11,6 +11,7 @@ from utils_neo4j import get_driver, close_driver, get_session
 from ai.schema.schema_utils import get_cached_schema, fetch_schema_from_neo4j
 from ai.terminology.loader import load as load_terminology, as_text as terminology_as_text
 from ai.fewshots.loader import load_text as load_examples_text
+from ai.fewshots.vector_store import get_vector_store
 from ai.llmops.langfuse_client import create_completion, get_prompt_from_langfuse
 from openai import OpenAI  # type: ignore
 from dotenv import load_dotenv  # type: ignore
@@ -44,7 +45,11 @@ def summarize_results(question: str, cypher: str, rows) -> str:
     model = os.environ.get("OPENAI_MODEL")
     
     # Fetch summarization prompt from Langfuse
-    prompt_label = os.environ.get("PROMPT_LABEL", "production")
+    prompt_label = os.environ.get("PROMPT_LABEL")
+    if not prompt_label:
+        raise RuntimeError(
+            "PROMPT_LABEL not set. Please set PROMPT_LABEL in .env file."
+        )
     summary_prompt = get_prompt_from_langfuse("graph-result-summarizer", label=prompt_label)
     params = summary_prompt.config or {}
     temperature = float(params.get("temperature", 0.0))
@@ -85,22 +90,23 @@ def main() -> None:
     )
 
     # Schema-only mode (CLI flag or env var)
+    schema_only_env = os.environ.get("SCHEMA_ONLY", "").lower()
     if any(arg in {"--schema", "-s"} for arg in sys.argv[1:]) or \
-       str(os.environ.get("SCHEMA_ONLY", "")).lower() in {"1", "true", "yes"}:
+       schema_only_env in {"1", "true", "yes"}:
         print(schema_string)
         return
 
-    # 2) Load terminology and examples as text blocks
+    # 2) Load terminology
     terminology_dict = load_terminology("v1")
     terminology_str = terminology_as_text(terminology_dict)
 
-    examples_str = load_examples_text(
-        "v1", prompt_id="graph.text_to_cypher", include_tags=None, limit=None
-    )
-
     # 3) Load prompt from Langfuse (single source of truth)
     try:
-        prompt_label = os.environ.get("PROMPT_LABEL", "production")
+        prompt_label = os.environ.get("PROMPT_LABEL")
+        if not prompt_label:
+            raise RuntimeError(
+                "PROMPT_LABEL not set. Please set PROMPT_LABEL in .env file."
+            )
         prompt = get_prompt_from_langfuse("graph.text_to_cypher", langfuse_client=None, label=prompt_label)
         params = prompt.config or {}
     except Exception as e:
@@ -114,7 +120,51 @@ def main() -> None:
     if len(sys.argv) > 1:
         question = " ".join(sys.argv[1:])
     else:
-        question = os.environ.get("QUESTION", "Return 10 A to B relationships")
+        question = os.environ.get("QUESTION")
+        if not question:
+            raise RuntimeError(
+                "QUESTION not provided. Either pass as command-line argument or set QUESTION in .env file."
+            )
+
+    # 4) Load examples using Neo4j vector similarity search or fallback to static examples
+    use_vector_search_str = os.environ.get("USE_VECTOR_SEARCH")
+    if use_vector_search_str is None:
+        raise RuntimeError(
+            "USE_VECTOR_SEARCH not set. Please set USE_VECTOR_SEARCH in .env file (true/false)."
+        )
+    use_vector_search = use_vector_search_str.lower() in {"1", "true", "yes"}
+    examples_str = ""
+    
+    if use_vector_search:
+        try:
+            # Use Neo4j vector store for similarity search
+            top_k_str = os.environ.get("VECTOR_SEARCH_TOP_K")
+            if not top_k_str:
+                raise RuntimeError(
+                    "VECTOR_SEARCH_TOP_K not set. Please set VECTOR_SEARCH_TOP_K in .env file."
+                )
+            top_k = int(top_k_str)
+            vector_store = get_vector_store()
+            # Get detailed results with similarity scores
+            results = vector_store.search(query=question, top_k=top_k)
+            if results:
+                print(f"✓ Found {len(results)} similar examples using vector search:")
+                for i, (example, similarity) in enumerate(results, 1):
+                    print(f"  {i}. [{similarity:.3f}] {example['question']}...")
+                # Format examples as text for prompt injection
+                examples_str = vector_store.get_examples_text(query=question, top_k=top_k)
+            else:
+                print("⚠️  No similar examples found, falling back to static examples")
+                use_vector_search = False
+        except Exception as e:
+            print(f"⚠️  Neo4j vector search failed: {e}, falling back to static examples")
+            use_vector_search = False
+    
+    if not use_vector_search or not examples_str:
+        # Fallback to static examples from YAML
+        examples_str = load_examples_text(
+            "v1", prompt_id="graph.text_to_cypher", include_tags=None, limit=None
+        )
 
     # Compile prompt with variables using Langfuse's compile method
     rendered = prompt.compile(
@@ -125,7 +175,8 @@ def main() -> None:
     )
 
     # Optionally debug-print the rendered prompt
-    if os.environ.get("DEBUG_PROMPT", "").lower() in {"1", "true", "yes"}:
+    debug_prompt_env = os.environ.get("DEBUG_PROMPT", "").lower()
+    if debug_prompt_env in {"1", "true", "yes"}:
         print(rendered)
 
     # 4) If OpenAI is available and API key is set, call the model

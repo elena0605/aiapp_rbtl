@@ -9,6 +9,7 @@ import os
 import sys
 import json
 import time
+from datetime import datetime
 
 # Ensure project root is on sys.path for absolute imports
 # From ai/fewshots/generate_examples.py, go up 2 levels to reach project root
@@ -38,6 +39,69 @@ def load_categories(categories_file: Path) -> list[dict]:
         raise ValueError(f"Unexpected JSON structure in {categories_file}")
     
     return categories
+
+
+def load_existing_examples(output_path: Path) -> dict[str, list[dict]]:
+    """Load existing query examples from file, organized by category_name.
+    
+    Returns:
+        Dictionary mapping category_name to list of examples
+    """
+    if not output_path.exists():
+        return {}
+    
+    try:
+        content = json.loads(output_path.read_text(encoding="utf-8"))
+        if isinstance(content, list):
+            # Convert list of {category_name, examples} to dict
+            result = {}
+            for item in content:
+                if isinstance(item, dict) and "category_name" in item:
+                    category_name = item["category_name"]
+                    examples = item.get("examples", [])
+                    result[category_name] = examples
+            return result
+        elif isinstance(content, dict):
+            # If it's already a dict, return as-is
+            return content
+        else:
+            return {}
+    except (json.JSONDecodeError, Exception) as e:
+        print(f"⚠️  Warning: Could not load existing examples from {output_path}: {e}")
+        return {}
+
+
+def merge_examples(existing: list[dict], new: list[dict]) -> list[dict]:
+    """Merge new examples with existing ones, avoiding exact duplicates.
+    
+    Args:
+        existing: List of existing examples (may have timestamps)
+        new: List of new examples (will have timestamps added)
+    
+    Returns:
+        Merged list with all unique examples
+    """
+    # Create a set of (question, cypher) tuples from existing examples for deduplication
+    existing_keys = set()
+    merged = list(existing)  # Start with existing examples
+    
+    for ex in existing:
+        question = ex.get("question", "").strip()
+        cypher = ex.get("cypher", "").strip()
+        if question and cypher:
+            existing_keys.add((question.lower(), cypher.strip()))
+    
+    # Add new examples that don't already exist
+    for ex in new:
+        question = ex.get("question", "").strip()
+        cypher = ex.get("cypher", "").strip()
+        if question and cypher:
+            key = (question.lower(), cypher.strip())
+            if key not in existing_keys:
+                merged.append(ex)
+                existing_keys.add(key)  # Prevent duplicates within new examples too
+    
+    return merged
 
 
 def generate_examples_for_category(
@@ -160,6 +224,8 @@ def generate_examples_for_category(
             examples = []
         
         # Validate and clean examples (should be dicts with question and cypher)
+        # Add timestamp to each example
+        timestamp = datetime.now().isoformat()
         valid_examples = []
         for ex in examples:
             if isinstance(ex, dict):
@@ -168,7 +234,8 @@ def generate_examples_for_category(
                 if question and cypher:
                     valid_examples.append({
                         "question": question,
-                        "cypher": cypher
+                        "cypher": cypher,
+                        "added_at": timestamp
                     })
         
         # Print generated examples
@@ -392,7 +459,7 @@ def main() -> None:
     print(output_json)
     print("="*80)
 
-    # Save to file
+    # Determine output file path
     output_file = os.environ.get("OUTPUT_FILE")
     if output_file:
         output_path = Path(output_file)
@@ -401,10 +468,65 @@ def main() -> None:
         fewshots_dir = Path(__file__).resolve().parent
         output_path = fewshots_dir / "query_examples.json"
     
+    # Load existing examples
+    existing_by_category = load_existing_examples(output_path)
+    
+    # Merge new results with existing examples
+    merged_results = []
+    all_category_names = set()
+    
+    # First, add all existing categories (that weren't regenerated)
+    for category_name, examples in existing_by_category.items():
+        all_category_names.add(category_name)
+        # Check if this category was regenerated in this run
+        regenerated = any(r["category_name"] == category_name for r in results)
+        if not regenerated:
+            merged_results.append({
+                "category_name": category_name,
+                "examples": examples
+            })
+    
+    # Then, merge or add newly generated categories
+    for new_result in results:
+        category_name = new_result["category_name"]
+        new_examples = new_result["examples"]
+        
+        if category_name in existing_by_category:
+            # Merge with existing examples
+            existing_examples = existing_by_category[category_name]
+            merged_examples = merge_examples(existing_examples, new_examples)
+            print(f"  Category '{category_name}': Merged {len(new_examples)} new examples with {len(existing_examples)} existing")
+        else:
+            # New category
+            merged_examples = new_examples
+            print(f"  Category '{category_name}': Added {len(new_examples)} new examples")
+        
+        # Update or add the category
+        category_found = False
+        for item in merged_results:
+            if item["category_name"] == category_name:
+                item["examples"] = merged_examples
+                category_found = True
+                break
+        
+        if not category_found:
+            merged_results.append({
+                "category_name": category_name,
+                "examples": merged_examples
+            })
+    
+    # Sort by category name for consistent output
+    merged_results.sort(key=lambda x: x["category_name"])
+    
+    # Save merged results
+    output_json = json.dumps(merged_results, indent=2, ensure_ascii=False)
     output_path.write_text(output_json, encoding="utf-8")
+    
     print(f"\n✓ Query examples saved to: {output_path}")
-    print(f"  Total categories: {len(results)}")
-    print(f"  Total examples: {sum(len(r['examples']) for r in results)}")
+    print(f"  Total categories: {len(merged_results)}")
+    total_examples = sum(len(r['examples']) for r in merged_results)
+    new_examples_count = sum(len(r['examples']) for r in results)
+    print(f"  Total examples: {total_examples} (added {new_examples_count} new in this run)")
 
 
 if __name__ == "__main__":

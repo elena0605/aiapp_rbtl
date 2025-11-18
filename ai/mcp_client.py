@@ -1,6 +1,12 @@
 """MCP Client for connecting to MCP servers like Neo4j GDS Agent.
 
 This module provides functionality to connect to MCP servers and use their tools.
+
+KNOWN ISSUE: The gds-agent MCP server currently has a bug where it connects to Neo4j
+but doesn't send the MCP initialization message, causing the client to hang.
+See MCP_ISSUE.md for details.
+
+Workaround: Use Neo4j GDS library directly instead of via MCP.
 """
 
 from __future__ import annotations
@@ -57,28 +63,57 @@ class MCPClient:
         
     async def connect(self) -> None:
         """Connect to the MCP server."""
+        print(f"DEBUG: Creating server params with command: {self.command}, args: {self.args}")
         server_params = StdioServerParameters(
             command=self.command,
             args=self.args,
             env=self.env,
         )
         
+        print("DEBUG: Creating stdio_client...")
         # stdio_client returns an async context manager
         # We need to enter it and keep it alive
         self._stdio_context = stdio_client(server_params)
+        print("DEBUG: Entering stdio context...")
         stdio_transport = await self._stdio_context.__aenter__()
+        print(f"DEBUG: Got stdio_transport, type: {type(stdio_transport)}")
         
         # stdio_transport is a tuple of (read_stream, write_stream)
         if isinstance(stdio_transport, tuple) and len(stdio_transport) == 2:
             read_stream, write_stream = stdio_transport
+            print(f"DEBUG: Unpacked tuple - read_stream: {type(read_stream)}, write_stream: {type(write_stream)}")
         else:
             # If it's not a tuple, it might be the streams directly
             read_stream, write_stream = stdio_transport, stdio_transport
+            print(f"DEBUG: Using transport directly as both streams: {type(stdio_transport)}")
         
+        # Give the server a moment to start up and connect to Neo4j
+        # The server logs show it connects to Neo4j, but it might need time to initialize
+        print("DEBUG: Waiting 2 seconds for server to initialize...")
+        await asyncio.sleep(2)
+        
+        print("DEBUG: Creating ClientSession...")
         self.session = ClientSession(read_stream, write_stream)
         
         # Initialize the session
-        await self.session.initialize()
+        # In MCP protocol, the CLIENT sends the initialization request
+        # ClientSession.initialize() sends the request and waits for server response
+        print("DEBUG: Initializing session (sending client init request, waiting for server response)...")
+        try:
+            # Add a timeout to see if it's truly hanging
+            init_result = await asyncio.wait_for(
+                self.session.initialize(),
+                timeout=15.0  # Increased timeout to 15 seconds
+            )
+            print(f"DEBUG: Session initialized successfully: {init_result}")
+        except asyncio.TimeoutError:
+            print("ERROR: Session initialization timed out after 15 seconds")
+            print("This might indicate the MCP server isn't sending its initialization message")
+            print("The server may be waiting for something or there's a protocol issue")
+            raise
+        except Exception as e:
+            print(f"ERROR: Session initialization failed: {type(e).__name__}: {e}")
+            raise
     
     async def list_tools(self) -> List[Dict[str, Any]]:
         """List available tools from the MCP server.
@@ -87,9 +122,13 @@ class MCPClient:
             List of tool definitions
         """
         if self.session is None:
+            print("DEBUG: Session is None, connecting...")
             await self.connect()
         
+        print("DEBUG: Calling session.list_tools()...")
         result = await self.session.list_tools()
+        print(f"DEBUG: Got result from list_tools, type: {type(result)}")
+        print(f"DEBUG: Result has {len(result.tools)} tools")
         return result.tools
     
     async def call_tool(
@@ -114,13 +153,16 @@ class MCPClient:
     
     async def close(self) -> None:
         """Close the connection to the MCP server."""
-        if self.session:
-            await self.session.close()
-            self.session = None
+        # ClientSession doesn't have a close() method - it's managed by the stdio context
+        # Just clear the reference
+        self.session = None
         
         # Exit the stdio context manager
         if self._stdio_context:
-            await self._stdio_context.__aexit__(None, None, None)
+            try:
+                await self._stdio_context.__aexit__(None, None, None)
+            except Exception as e:
+                print(f"DEBUG: Error closing stdio context: {e}")
             self._stdio_context = None
 
 

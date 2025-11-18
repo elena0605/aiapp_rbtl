@@ -2,7 +2,7 @@
 # This file should be placed in the new graphrag/ project root
 
 # Neo4j Database Driver
-neo4j>=5.7
+# neo4j>=5.7
 
 # Langfuse - LLM Observability & Prompt Management
 langfuse>=3.0.0
@@ -19,11 +19,19 @@ python-dotenv>=1.0.0
 # YAML Parsing (for prompts, terminology, examples)
 pyyaml>=6.0
 
+# Vector operations for similarity search
+numpy>=1.24.0
+
 # Optional: For type hints (recommended)
 typing-extensions>=4.0.0
 
 # MCP (Model Context Protocol) Client SDK
 # Install with: pip install mcp
 # Or use the official MCP Python SDK from Anthropic
-mcp>=0.1.0
+# mcp>=0.1.0
 
+# MCP (Model Context Protocol) - must be >=1.11.0 for gds-agent compatibility
+mcp[cli]>=1.11.0
+# Graph Data Science - must be >=1.16 for gds-agent compatibility
+graphdatascience>=1.16
+neo4j>=5.28.1

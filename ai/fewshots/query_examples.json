@@ -1,1 +1,392 @@
-[]
+[
+  {
+    "category_name": "Content exposure by theme and topic",
+    "examples": [
+      {
+        "question": "How many YouTube videos are associated with gaming topics?",
+        "cypher": "MATCH (v:YouTubeVideo)-[:HAS_TOPIC]->(:YoutubeVideoTopic {name: 'Gaming'}) RETURN COUNT(v) AS gaming_videos_count",
+        "added_at": "2025-11-17T17:34:35.142676"
+      },
+      {
+        "question": "List TikTok videos tagged with 'fitness' hashtag and their view counts.",
+        "cypher": "MATCH (v:TikTokVideo)-[:HAS_TAG]->(:TikTokHashTag {name: 'fitness'}) RETURN v.video_title AS title, v.view_count AS views LIMIT 10",
+        "added_at": "2025-11-17T17:34:35.142676"
+      },
+      {
+        "question": "Find the top 5 YouTube channels that frequently post about sports topics.",
+        "cypher": "MATCH (c:YouTubeChannel)-[:HAS_VIDEO]->(v:YouTubeVideo)-[:HAS_TOPIC]->(:YoutubeVideoTopic {name: 'Sports'}) RETURN c.title AS channel_name, COUNT(v) AS video_count ORDER BY video_count DESC LIMIT 5",
+        "added_at": "2025-11-17T17:34:35.142676"
+      },
+      {
+        "question": "Which TikTok users have posted videos with unhealthy lifestyle labels?",
+        "cypher": "MATCH (u:TikTokUser)-[:HAS_VIDEO]->(v:TikTokVideo) WHERE v.video_label_content CONTAINS 'unhealthy lifestyle' RETURN u.username AS user, v.video_title AS video LIMIT 10",
+        "added_at": "2025-11-17T17:34:35.142676"
+      },
+      {
+        "question": "How many videos related to 'news' and 'commentary' topics are available on YouTube?",
+        "cypher": "MATCH (v:YouTubeVideo)-[:HAS_TOPIC]->(:YoutubeVideoTopic {name: 'News & Commentary'}) RETURN COUNT(v) AS news_videos_count",
+        "added_at": "2025-11-17T17:34:35.142676"
+      },
+      {
+        "question": "Get a list of TikTok videos mentioning 'gaming' in their title.",
+        "cypher": "MATCH (v:TikTokVideo) WHERE v.video_title CONTAINS 'gaming' RETURN v.video_title AS title, v.view_count AS views LIMIT 10",
+        "added_at": "2025-11-17T17:34:35.142676"
+      },
+      {
+        "question": "Identify influencers who post fitness-related content both on TikTok and YouTube.",
+        "cypher": "MATCH (i:Influencer)-[:HAS_ACCOUNT]->(tt:TikTokUser)-[:HAS_VIDEO]->(vt:TikTokVideo), (i)-[:HAS_ACCOUNT]->(yt:YouTubeChannel)-[:HAS_VIDEO]->(vy:YouTubeVideo)-[:HAS_TOPIC]->(:YoutubeVideoTopic {name: 'Fitness'}) WHERE vt.video_label_content CONTAINS 'fitness' RETURN i.name AS influencer_name LIMIT 10",
+        "added_at": "2025-11-17T17:34:35.142676"
+      },
+      {
+        "question": "Which YouTube videos include both 'lifestyle' and 'personal' tags?",
+        "cypher": "MATCH (v:YouTubeVideo)-[:HAS_TAG]->(t:YoutubeVideoTag) WHERE 'Lifestyle' IN t.name AND 'Personal' IN t.name RETURN v.video_title AS title, v.view_count AS views LIMIT 10",
+        "added_at": "2025-11-17T17:34:35.142676"
+      }
+    ]
+  },
+  {
+    "category_name": "Exposure-paths from influencers to youth",
+    "examples": [
+      {
+        "question": "How do videos by TikTok influencers reach young people who comment on them?",
+        "cypher": "MATCH (i:Influencer)-[:HAS_ACCOUNT]->(tu:TikTokUser)-[:HAS_VIDEO]->(tv:TikTokVideo)-[:HAS_COMMENT]->(tc:TikTokComment)<-[:FOLLOWS]-(p:Person) RETURN i.name AS influencer, tu.username AS tiktok_user, tv.video_id AS video_id, p.UserID AS person_id LIMIT 10",
+        "added_at": "2025-11-17T17:40:42.427313"
+      },
+      {
+        "question": "Which youth are commenting on videos by specific influencers through TikTok?",
+        "cypher": "MATCH (i:Influencer {name: 'Specific Influencer'})-[:HAS_ACCOUNT]->(tu:TikTokUser)-[:HAS_VIDEO]->(:TikTokVideo)-[:HAS_COMMENT]->(:TikTokComment)<-[:FOLLOWS]-(p:Person) RETURN p.UserID AS person_id, i.name AS influencer LIMIT 10",
+        "added_at": "2025-11-17T17:40:42.427313"
+      },
+      {
+        "question": "Find the connection paths between YouTube influencers and youth commenting on related TikTok content.",
+        "cypher": "MATCH (yt:YouTubeChannel)<-[:HAS_ACCOUNT]-(i:Influencer)-[:HAS_ACCOUNT]->(tu:TikTokUser)-[:HAS_VIDEO]->(tv:TikTokVideo)-[:HAS_COMMENT]->(:TikTokComment)<-[:FOLLOWS]-(p:Person) RETURN yt.title AS youtube_channel, i.name AS influencer, p.UserID AS person_id, tv.video_id AS video_id LIMIT 10",
+        "added_at": "2025-11-17T17:40:42.427313"
+      },
+      {
+        "question": "Which TikTok influencers have the most interactions with youth users through comments?",
+        "cypher": "MATCH (i:Influencer)-[:HAS_ACCOUNT]->(tu:TikTokUser)-[:HAS_VIDEO]->(:TikTokVideo)-[:HAS_COMMENT]->(:TikTokComment)<-[:FOLLOWS]-(p:Person) RETURN i.name AS influencer, COUNT(p.UserID) AS interactions ORDER BY interactions DESC LIMIT 10",
+        "added_at": "2025-11-17T17:40:42.427313"
+      },
+      {
+        "question": "What are the video titles and users involved in the comment pathways from influencers to youth?",
+        "cypher": "MATCH (i:Influencer)-[:HAS_ACCOUNT]->(tu:TikTokUser)-[:HAS_VIDEO]->(tv:TikTokVideo)-[:HAS_COMMENT]->(:TikTokComment)<-[:FOLLOWS]-(p:Person) RETURN i.name AS influencer, tv.video_title AS video_title, p.UserID AS person_id LIMIT 10",
+        "added_at": "2025-11-17T17:40:42.427313"
+      },
+      {
+        "question": "Identify the relationship between influencers and young people commenting on the same video.",
+        "cypher": "MATCH (i:Influencer)-[:HAS_ACCOUNT]->(tu:TikTokUser)-[:HAS_VIDEO]->(tv:TikTokVideo)-[:HAS_COMMENT]->(tc:TikTokComment)<-[:FOLLOWS]-(p:Person) WHERE tc.video_id = tv.video_id RETURN DISTINCT i.name AS influencer, tv.video_id AS video_id, p.UserID AS person_id LIMIT 10",
+        "added_at": "2025-11-17T17:40:42.427313"
+      },
+      {
+        "question": "Which youth follow influencers and leave comments on their TikTok videos?",
+        "cypher": "MATCH (p:Person)-[:FOLLOWS]->(i:Influencer)-[:HAS_ACCOUNT]->(tu:TikTokUser)-[:HAS_VIDEO]->(:TikTokVideo)-[:HAS_COMMENT]->(:TikTokComment) RETURN DISTINCT p.UserID AS person_id, i.name AS influencer LIMIT 10",
+        "added_at": "2025-11-17T17:40:42.427313"
+      },
+      {
+        "question": "Show influencers who have accounts on TikTok and whose videos are commented on by youth.",
+        "cypher": "MATCH (i:Influencer)-[:HAS_ACCOUNT]->(tu:TikTokUser)-[:HAS_VIDEO]->(tv:TikTokVideo)-[:HAS_COMMENT]->(tc:TikTokComment)<-[:FOLLOWS]-(p:Person) RETURN DISTINCT i.name AS influencer, tu.username AS tiktok_user, COUNT(tc) AS comment_count ORDER BY comment_count DESC LIMIT 10",
+        "added_at": "2025-11-17T17:40:42.427313"
+      },
+      {
+        "question": "Find TikTok videos by influencers that have received youth feedback.",
+        "cypher": "MATCH (i:Influencer)-[:HAS_ACCOUNT]->(tu:TikTokUser)-[:HAS_VIDEO]->(tv:TikTokVideo)-[:HAS_COMMENT]->(tc:TikTokComment)<-[:FOLLOWS]-(p:Person) RETURN tv.video_id AS video_id, tv.video_title AS video_title, i.name AS influencer LIMIT 10",
+        "added_at": "2025-11-17T17:40:42.427313"
+      }
+    ]
+  },
+  {
+    "category_name": "Follow relationships and network neighborhoods",
+    "examples": [
+      {
+        "question": "Which influencers do people living in 'Rotterdam' municipality follow?",
+        "cypher": "MATCH (p:Person)-[:LIVES_IN_MUNICIPALITY]->(m:Municipality {municipality_name: 'Rotterdam'}), (p)-[:FOLLOWS]->(i:Influencer) RETURN DISTINCT i.name AS influencer",
+        "added_at": "2025-11-17T17:36:46.886801"
+      },
+      {
+        "question": "Who are the influencers followed by more than 100 people in the database?",
+        "cypher": "MATCH (p:Person)-[:FOLLOWS]->(i:Influencer) WITH i, COUNT(p) AS followers WHERE followers > 100 RETURN i.name AS influencer, followers ORDER BY followers DESC",
+        "added_at": "2025-11-17T17:36:46.886801"
+      },
+      {
+        "question": "Find the influencers that are followed by people living in an area with over 50% non-EU migrants.",
+        "cypher": "MATCH (p:Person)-[:LIVES_IN_AREA]->(a:Area), (p)-[:FOLLOWS]->(i:Influencer) WHERE a.percentage_non_eu_migrants > 50 RETURN DISTINCT i.name AS influencer",
+        "added_at": "2025-11-17T17:36:46.886801"
+      },
+      {
+        "question": "List all the people who follow the influencer with TikTok username 'dance_master'.",
+        "cypher": "MATCH (:Influencer {tiktok_username: 'dance_master'})<-[:FOLLOWS]-(p:Person) RETURN p.UserID AS user_id",
+        "added_at": "2025-11-17T17:36:46.886801"
+      },
+      {
+        "question": "Which influencer is the most followed by people aged under 18?",
+        "cypher": "MATCH (p:Person)-[:FOLLOWS]->(i:Influencer) WHERE toInteger(p.age) < 18 RETURN i.name AS influencer, COUNT(p) AS followers ORDER BY followers DESC LIMIT 1",
+        "added_at": "2025-11-17T17:36:46.886801"
+      },
+      {
+        "question": "Identify if there's an influencer followed by both TikTok and YouTube users.",
+        "cypher": "MATCH (p:Person)-[:FOLLOWS]->(i:Influencer) WHERE p.tiktok_account1 IS NOT NULL AND p.youtube_account1 IS NOT NULL RETURN DISTINCT i.name AS influencer",
+        "added_at": "2025-11-17T17:36:46.886801"
+      },
+      {
+        "question": "Which influencers are most followed by users who are active on TikTok?",
+        "cypher": "MATCH (p:Person)-[:FOLLOWS]->(i:Influencer) WHERE p.tiktok_use IS NOT NULL RETURN i.name AS influencer, COUNT(p) AS followers ORDER BY followers DESC",
+        "added_at": "2025-11-17T17:36:46.886801"
+      },
+      {
+        "question": "Find influencers followed by users who often feel lonely.",
+        "cypher": "MATCH (p:Person {often_lonely: 'Yes'})-[:FOLLOWS]->(i:Influencer) RETURN DISTINCT i.name AS influencer",
+        "added_at": "2025-11-17T17:36:46.886801"
+      },
+      {
+        "question": "Who are the top 5 influencers followed in areas with a high degree of urbanization?",
+        "cypher": "MATCH (p:Person)-[:LIVES_IN_AREA]->(a:Area), (p)-[:FOLLOWS]->(i:Influencer) WHERE a.degree_of_urbanization > 70 RETURN i.name AS influencer, COUNT(p) AS followers ORDER BY followers DESC LIMIT 5",
+        "added_at": "2025-11-17T17:36:46.886801"
+      },
+      {
+        "question": "Identify influencers with accounts recognized by verified TikTok users.",
+        "cypher": "MATCH (tt:TikTokUser {is_verified: true})<-[:HAS_ACCOUNT]-(i:Influencer) RETURN DISTINCT i.name AS influencer, tt.username AS tiktok_handle",
+        "added_at": "2025-11-17T17:36:46.886801"
+      },
+      {
+        "question": "Which influencers does the person with UserID 123 follow?",
+        "cypher": "MATCH (p:Person {UserID: 123})-[:FOLLOWS]->(i:Influencer) RETURN i.name AS influencer_name",
+        "added_at": "2025-11-17T17:37:32.470732"
+      },
+      {
+        "question": "List the TikTok usernames of influencers followed by someone living in the area with name 'Downtown'.",
+        "cypher": "MATCH (p:Person)-[:LIVES_IN_AREA]->(a:Area {area_name: 'Downtown'}), (p)-[:FOLLOWS]->(i:Influencer)-[:HAS_ACCOUNT]->(tt:TikTokUser) RETURN i.name AS influencer_name, tt.username AS tiktok_username",
+        "added_at": "2025-11-17T17:37:32.470732"
+      },
+      {
+        "question": "Find the top 5 influencers with the most followers who have a YouTube account.",
+        "cypher": "MATCH (i:Influencer)-[:HAS_ACCOUNT]->(yt:YouTubeChannel) RETURN i.name AS influencer_name, COUNT(DISTINCT p) AS follower_count ORDER BY follower_count DESC LIMIT 5",
+        "added_at": "2025-11-17T17:37:32.470732"
+      },
+      {
+        "question": "How many unique influencers does each person follow?",
+        "cypher": "MATCH (p:Person)-[:FOLLOWS]->(i:Influencer) RETURN p.UserID AS person_id, COUNT(DISTINCT i) AS influencer_count",
+        "added_at": "2025-11-17T17:37:32.470732"
+      },
+      {
+        "question": "Which influencers are popular in the municipality with name 'Greenwich'? List their TikTok usernames.",
+        "cypher": "MATCH (p:Person)-[:LIVES_IN_MUNICIPALITY]->(m:Municipality {municipality_name: 'Greenwich'}), (p)-[:FOLLOWS]->(i:Influencer)-[:HAS_ACCOUNT]->(tt:TikTokUser) RETURN i.name AS influencer_name, tt.username AS tiktok_username",
+        "added_at": "2025-11-17T17:37:32.470732"
+      },
+      {
+        "question": "Who are the influencers followed by persons living in areas with more than 20% of households with children?",
+        "cypher": "MATCH (p:Person)-[:LIVES_IN_AREA]->(a:Area)-[:BELONGS_TO]->(:Municipality) WHERE a.household_with_children_perc > 20 WITH DISTINCT p MATCH (p)-[:FOLLOWS]->(i:Influencer) RETURN i.name AS influencer_name",
+        "added_at": "2025-11-17T17:37:32.470732"
+      },
+      {
+        "question": "Find influencers connected to the person who uses TikTok with account 'xyz_tiktok'.",
+        "cypher": "MATCH (p:Person {tiktok_account1: 'xyz_tiktok'})-[:FOLLOWS]->(i:Influencer) RETURN i.name AS influencer_name",
+        "added_at": "2025-11-17T17:37:32.470732"
+      }
+    ]
+  },
+  {
+    "category_name": "Geography and socioeconomic context",
+    "examples": [
+      {
+        "question": "Which municipalities have the highest percentage of social benefits recipients?",
+        "cypher": "MATCH (m:Municipality) RETURN m.municipality_name AS municipality, m.social_benefits_percentage AS social_benefits ORDER BY social_benefits DESC LIMIT 5",
+        "added_at": "2025-11-17T17:38:21.230911"
+      },
+      {
+        "question": "What is the average household income of areas where people with mental health issues live?",
+        "cypher": "MATCH (p:Person {has_mental_health_issues: 'Yes'})-[:LIVES_IN_AREA]->(a:Area) RETURN a.area_name AS area, AVG(a.income_standardized_household_income_avg) AS average_income",
+        "added_at": "2025-11-17T17:38:21.230911"
+      },
+      {
+        "question": "List the top 10 areas by housing density.",
+        "cypher": "MATCH (a:Area) RETURN a.area_name AS area, a.housing_density AS housing_density ORDER BY housing_density DESC LIMIT 10",
+        "added_at": "2025-11-17T17:38:21.230911"
+      },
+      {
+        "question": "How many people live in municipalities with high urbanization?",
+        "cypher": "MATCH (p:Person)-[:LIVES_IN_MUNICIPALITY]->(m:Municipality) WHERE m.degree_of_urbanization > 75 RETURN COUNT(p) AS number_of_people",
+        "added_at": "2025-11-17T17:38:21.230911"
+      },
+      {
+        "question": "Do people who have friends that use cannabis tend to live in areas with higher youth populations?",
+        "cypher": "MATCH (p:Person {friends_cannabis: 'Yes'})-[:LIVES_IN_AREA]->(a:Area) RETURN a.area_name AS area, AVG(a.young_age_perc) AS average_youth_population",
+        "added_at": "2025-11-17T17:38:21.230911"
+      },
+      {
+        "question": "Find the percentage of non-EU migrants in each municipality and the population density.",
+        "cypher": "MATCH (m:Municipality) RETURN m.municipality_name AS municipality, m.percentage_non_eu_migrants AS non_eu_migrants_perc, m.population_density AS population_density",
+        "added_at": "2025-11-17T17:38:21.230911"
+      },
+      {
+        "question": "What is the relationship between school theft perceptions and labor participation in different areas?",
+        "cypher": "MATCH (p:Person)-[:LIVES_IN_AREA]->(a:Area) RETURN a.area_name AS area, p.school_theft AS school_theft, a.labor_net_participation_rate AS labor_participation",
+        "added_at": "2025-11-17T17:38:21.230911"
+      },
+      {
+        "question": "Which areas have the lowest median property value but high household wealth median?",
+        "cypher": "MATCH (a:Area) RETURN a.area_name AS area, a.housing_property_value_avg AS property_value, a.income_household_wealth_median AS household_wealth ORDER BY property_value ASC, household_wealth DESC LIMIT 5",
+        "added_at": "2025-11-17T17:38:21.230911"
+      },
+      {
+        "question": "How does the average educational level vary in areas where many women live?",
+        "cypher": "MATCH (p:Person)-[:LIVES_IN_AREA]->(a:Area) WITH a, AVG(CASE WHEN p.gender = 'Female' THEN 1 ELSE 0 END) AS female_percentage WHERE female_percentage > 0.5 RETURN a.area_name AS area, a.avg_educational_level AS avg_educational_level",
+        "added_at": "2025-11-17T17:38:21.230911"
+      },
+      {
+        "question": "Which municipality has the most balanced gender distribution?",
+        "cypher": "MATCH (m:Municipality) RETURN m.municipality_name AS municipality, ABS(m.percentage_female - 50) AS gender_balance ORDER BY gender_balance ASC LIMIT 1",
+        "added_at": "2025-11-17T17:38:21.230911"
+      }
+    ]
+  },
+  {
+    "category_name": "Influencer reach and cross-platform presence",
+    "examples": [
+      {
+        "question": "Which influencers have more than 100k followers on TikTok?",
+        "cypher": "MATCH (i:Influencer)-[:HAS_ACCOUNT]->(tt:TikTokUser) WHERE tt.follower_count > 100000 RETURN i.name AS influencer, tt.username AS tiktok_username",
+        "added_at": "2025-11-17T17:35:47.443757"
+      },
+      {
+        "question": "What is the overlap of videos between TikTok and YouTube for influencer named 'John Doe'?",
+        "cypher": "MATCH (i:Influencer {name: 'John Doe'})-[:HAS_ACCOUNT]->(tt:TikTokUser)-[:HAS_VIDEO]->(tv:TikTokVideo), (i)-[:HAS_ACCOUNT]->(yt:YouTubeChannel)-[:HAS_VIDEO]->(yv:YouTubeVideo) WHERE tv.video_title = yv.video_title RETURN tv.video_id AS tiktok_video_id, yv.video_id AS youtube_video_id, tv.video_title AS shared_video_title",
+        "added_at": "2025-11-17T17:35:47.443757"
+      },
+      {
+        "question": "List influencers with more than 50 TikTok videos and their corresponding YouTube video count",
+        "cypher": "MATCH (i:Influencer)-[:HAS_ACCOUNT]->(tt:TikTokUser), (i)-[:HAS_ACCOUNT]->(yt:YouTubeChannel) WHERE tt.video_count > 50 RETURN i.name AS influencer, tt.username AS tiktok_username, yt.video_count AS youtube_video_count",
+        "added_at": "2025-11-17T17:35:47.443757"
+      },
+      {
+        "question": "Who are the verified TikTok influencers?",
+        "cypher": "MATCH (i:Influencer)-[:HAS_ACCOUNT]->(tt:TikTokUser) WHERE tt.is_verified = true RETURN i.name AS influencer, tt.username AS verified_tiktok_username",
+        "added_at": "2025-11-17T17:35:47.443757"
+      },
+      {
+        "question": "Find influencers with more engagement on YouTube (more than 10k likes) than TikTok",
+        "cypher": "MATCH (i:Influencer)-[:HAS_ACCOUNT]->(tt:TikTokUser)-[:HAS_VIDEO]->(tv:TikTokVideo), (i)-[:HAS_ACCOUNT]->(yt:YouTubeChannel)-[:HAS_VIDEO]->(yv:YouTubeVideo) WHERE yv.like_count > 10000 AND yv.like_count > tv.like_count RETURN i.name AS influencer, tt.username AS tiktok_username, yv.video_title AS youtube_video_title",
+        "added_at": "2025-11-17T17:35:47.443757"
+      },
+      {
+        "question": "How many influencers from Rotterdam have accounts on both TikTok and YouTube?",
+        "cypher": "MATCH (p:Person)-[:LIVES_IN_MUNICIPALITY]->(:Municipality {municipality_name: 'Rotterdam'}), (p)-[:FOLLOWS]->(i:Influencer)-[:HAS_ACCOUNT]->(tt:TikTokUser), (i)-[:HAS_ACCOUNT]->(yt:YouTubeChannel) RETURN COUNT(DISTINCT i) AS influencer_count",
+        "added_at": "2025-11-17T17:35:47.443757"
+      },
+      {
+        "question": "Which cross-platform influencers have TikTok videos with more than 1 million views?",
+        "cypher": "MATCH (i:Influencer)-[:HAS_ACCOUNT]->(tt:TikTokUser)-[:HAS_VIDEO]->(tv:TikTokVideo) WHERE tv.view_count > 1000000 RETURN i.name AS influencer, tt.username AS tiktok_handle, tv.video_id AS viral_video_id",
+        "added_at": "2025-11-17T17:35:47.443757"
+      },
+      {
+        "question": "List the YouTube channels of influencers who have TikTok usernames ending with 'Official'",
+        "cypher": "MATCH (i:Influencer)-[:HAS_ACCOUNT]->(tt:TikTokUser), (i)-[:HAS_ACCOUNT]->(yt:YouTubeChannel) WHERE tt.username ENDS WITH 'Official' RETURN i.name AS influencer, yt.channel_id AS youtube_channel_id, yt.title AS youtube_channel_name",
+        "added_at": "2025-11-17T17:35:47.443757"
+      },
+      {
+        "question": "Are there influencers with more than 100k followers on YouTube but less than 25k on TikTok?",
+        "cypher": "MATCH (i:Influencer)-[:HAS_ACCOUNT]->(tt:TikTokUser), (i)-[:HAS_ACCOUNT]->(yt:YouTubeChannel) WHERE yt.subscriber_count > 100000 AND tt.follower_count < 25000 RETURN i.name AS influencer, yt.title AS youtube_channel_title",
+        "added_at": "2025-11-17T17:35:47.443757"
+      },
+      {
+        "question": "How many videos does the influencer known for 'John Music' have on YouTube?",
+        "cypher": "MATCH (i:Influencer {name: 'John Music'})-[:HAS_ACCOUNT]->(yt:YouTubeChannel) RETURN yt.video_count AS youtube_video_count",
+        "added_at": "2025-11-17T17:35:47.443757"
+      }
+    ]
+  },
+  {
+    "category_name": "Node summary & attribute distributions",
+    "examples": [
+      {
+        "question": "How many TikTokUsers have more than 1 million followers?",
+        "cypher": "MATCH (u:TikTokUser) WHERE u.follower_count > 1000000 RETURN count(u) AS users_with_over_1M_followers"
+      },
+      {
+        "question": "What is the average video count across all TikTokUsers?",
+        "cypher": "MATCH (u:TikTokUser) RETURN avg(u.video_count) AS average_video_count"
+      },
+      {
+        "question": "What are the distinct bio URLs of verified TikTok users?",
+        "cypher": "MATCH (u:TikTokUser) WHERE u.is_verified = true RETURN DISTINCT u.bio_url AS verified_user_bio_urls"
+      },
+      {
+        "question": "List the top 10 hashtags used in TikTok videos by their name.",
+        "cypher": "MATCH (v:TikTokVideo)-[:HAS_TAG]->(t:TikTokHashTag) RETURN t.name AS hashtag_name, count(v) AS usage_count ORDER BY usage_count DESC LIMIT 10"
+      },
+      {
+        "question": "What is the distribution of like counts among TikTokVideos?",
+        "cypher": "MATCH (v:TikTokVideo) RETURN v.like_count AS like_count ORDER BY v.like_count"
+      },
+      {
+        "question": "What is the median population density in all municipalities?",
+        "cypher": "MATCH (m:Municipality) RETURN percentileCont(m.population_density, 0.5) AS median_population_density"
+      },
+      {
+        "question": "How many areas have a higher percentage of water than population density?",
+        "cypher": "MATCH (a:Area) WHERE a.percentage_water > a.population_density RETURN count(a) AS areas_with_more_water"
+      },
+      {
+        "question": "How many users have made comments on TikTok videos?",
+        "cypher": "MATCH (c:TikTokComment) RETURN count(DISTINCT c.username) AS unique_commenting_users"
+      },
+      {
+        "question": "What is the average likes count on YouTube videos across all channels?",
+        "cypher": "MATCH (v:YouTubeVideo) RETURN avg(v.like_count) AS average_youtube_likes"
+      },
+      {
+        "question": "Which age group of people has the highest percentage of smoking frequency?",
+        "cypher": "MATCH (p:Person) RETURN p.age AS age_group, count(p) AS count, sum(toInteger(p.smoking_frequency)) AS total_smoking_frequency ORDER BY total_smoking_frequency DESC LIMIT 1"
+      },
+      {
+        "question": "How many TikTok users are verified influencers?",
+        "cypher": "MATCH (i:Influencer)-[:HAS_ACCOUNT]->(tt:TikTokUser) WHERE tt.is_verified = true RETURN count(tt) AS verified_influencers",
+        "added_at": "2025-11-17T17:33:30.073425"
+      },
+      {
+        "question": "What is the average follower count for TikTok users?",
+        "cypher": "MATCH (tt:TikTokUser) RETURN avg(tt.follower_count) AS average_follower_count",
+        "added_at": "2025-11-17T17:33:30.073425"
+      },
+      {
+        "question": "What is the distribution of video counts among TikTok users?",
+        "cypher": "MATCH (tt:TikTokUser) RETURN tt.video_count AS video_count, count(tt) AS user_count ORDER BY video_count",
+        "added_at": "2025-11-17T17:33:30.073425"
+      },
+      {
+        "question": "How many distinct tags are used across all YouTube videos?",
+        "cypher": "MATCH (ytv:YouTubeVideo)-[:HAS_TAG]->(tag:YoutubeVideoTag) RETURN count(DISTINCT tag.name) AS distinct_tags_count",
+        "added_at": "2025-11-17T17:33:30.073425"
+      },
+      {
+        "question": "What percentage of people handle stress well?",
+        "cypher": "MATCH (p:Person) WHERE p.handles_stress_well = 'Yes' RETURN (count(p)*100.0 / toFloat(size((:Person)))) AS percentage_handles_stress_well",
+        "added_at": "2025-11-17T17:33:30.073425"
+      },
+      {
+        "question": "What is the most common smoking frequency reported by people?",
+        "cypher": "MATCH (p:Person) RETURN p.smoking_frequency AS smoking_frequency, count(p) AS frequency_count ORDER BY frequency_count DESC LIMIT 1",
+        "added_at": "2025-11-17T17:33:30.073425"
+      },
+      {
+        "question": "How many TikTok videos have more than 1 million views?",
+        "cypher": "MATCH (ttv:TikTokVideo) WHERE ttv.view_count > 1000000 RETURN count(ttv) AS popular_videos_count",
+        "added_at": "2025-11-17T17:33:30.073425"
+      },
+      {
+        "question": "What is the median age of people in the graph?",
+        "cypher": "MATCH (p:Person) RETURN percentileCont(toInteger(p.age), 0.5) AS median_age",
+        "added_at": "2025-11-17T17:33:30.073425"
+      },
+      {
+        "question": "Which areas have the highest average educational level?",
+        "cypher": "MATCH (a:Area) RETURN a.area_name AS area_name, a.avg_educational_level AS educational_level ORDER BY educational_level DESC LIMIT 5",
+        "added_at": "2025-11-17T17:33:30.073425"
+      },
+      {
+        "question": "How many TikTok users have a bio link to their YouTube channel?",
+        "cypher": "MATCH (tt:TikTokUser) WHERE tt.bio_url CONTAINS 'youtube' RETURN count(tt) AS users_with_youtube_link",
+        "added_at": "2025-11-17T17:33:30.073425"
+      }
+    ]
+  }
+]

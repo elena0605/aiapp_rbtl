@@ -55,6 +55,10 @@ OPENAI_MODEL=gpt-4o  # Optional, defaults to gpt-4o
 
 # Optional Configuration
 PROMPT_LABEL=production  # Optional, defaults to production
+
+# MongoDB Configuration (for Knowledge Base)
+MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/?retryWrites=true&w=majority
+MONGODB_DATABASE=graphrag  # Optional, defaults to graphrag
 ```
 
 **To get Langfuse keys (if you are not provided with keys already):**
