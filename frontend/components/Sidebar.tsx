@@ -1,24 +1,36 @@
 'use client'
 
 import { useState } from 'react'
-import { MessageSquare, Menu, BookOpen } from 'lucide-react'
+import { MessageSquare, Menu, BookOpen, Users, Star, GitBranch } from 'lucide-react'
 
-export type MenuOption = 'chat' | 'knowledge-base' | 'settings' | 'history'
+export type MenuOption = 'chat' | 'knowledge-base' | 'favorites' | 'graph-info'
 
 interface SidebarProps {
   activeOption: MenuOption
   onOptionChange: (option: MenuOption) => void
+  testerUsers: string[]
+  selectedTester: string | null
+  onTesterChange: (username: string | null) => void
+  isLoadingTesters: boolean
+  testerError?: string | null
 }
 
-export default function Sidebar({ activeOption, onOptionChange }: SidebarProps) {
+export default function Sidebar({
+  activeOption,
+  onOptionChange,
+  testerUsers,
+  selectedTester,
+  onTesterChange,
+  isLoadingTesters,
+  testerError,
+}: SidebarProps) {
   const [isCollapsed, setIsCollapsed] = useState(false)
 
   const menuOptions = [
     { id: 'chat' as MenuOption, label: 'Chat', icon: MessageSquare },
     { id: 'knowledge-base' as MenuOption, label: 'Knowledge Base', icon: BookOpen },
-    // More options can be added here in the future
-    // { id: 'settings' as MenuOption, label: 'Settings', icon: Settings },
-    // { id: 'history' as MenuOption, label: 'History', icon: History },
+    { id: 'favorites' as MenuOption, label: 'Favorites', icon: Star },
+    { id: 'graph-info' as MenuOption, label: 'Graph Info', icon: GitBranch },
   ]
 
   return (
@@ -62,12 +74,46 @@ export default function Sidebar({ activeOption, onOptionChange }: SidebarProps) 
         })}
       </nav>
 
-      {/* Footer */}
-      {!isCollapsed && (
-        <div className="p-4 border-t border-gray-700 text-xs text-gray-400">
-          <p>GraphRAG v1.0.0</p>
-        </div>
-      )}
+      {/* Footer/Testers */}
+      <div className="p-4 border-t border-gray-700 text-xs text-gray-400 space-y-3">
+        {!isCollapsed ? (
+          <>
+            <div className="flex items-center gap-2 text-gray-300">
+              <Users size={16} />
+              <span className="font-medium text-sm">Tester account</span>
+            </div>
+            {testerError && (
+              <p className="text-red-400 text-[11px]">{testerError}</p>
+            )}
+            {!testerError && (
+              <select
+                value={selectedTester ?? ''}
+                onChange={(e) => onTesterChange(e.target.value || null)}
+                disabled={isLoadingTesters || testerUsers.length === 0}
+                className="w-full bg-gray-900 text-white border border-gray-600 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60"
+              >
+                <option value="" disabled>
+                  {isLoadingTesters ? 'Loading testers...' : 'Select tester'}
+                </option>
+                {testerUsers.map((user) => (
+                  <option key={user} value={user}>
+                    {user}
+                  </option>
+                ))}
+              </select>
+            )}
+            <p className="text-[11px] leading-snug text-gray-500">
+              Chats are tied to this tester. Switch accounts to load their saved conversation.
+            </p>
+            <p>GraphRAG v1.0.0</p>
+          </>
+        ) : (
+          <div className="flex flex-col items-center gap-2 text-[10px] text-gray-500">
+            <Users size={18} />
+            <span>Expand to select tester</span>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

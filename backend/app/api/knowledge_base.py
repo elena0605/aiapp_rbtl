@@ -27,10 +27,17 @@ VECTOR_NODE_LABEL = os.getenv("VECTOR_NODE_LABEL", "QueryExample")
 router = APIRouter()
 
 
+def _normalize_created_by(value: Optional[str]) -> str:
+    """Ensure created_by is always a non-empty string."""
+    creator = (value or "ai").strip()
+    return creator or "ai"
+
+
 class AddQueryRequest(BaseModel):
     category_name: str
     question: str
     cypher: str
+    created_by: Optional[str] = "ai"
 
 
 class UpdateQueryRequest(BaseModel):
@@ -38,6 +45,7 @@ class UpdateQueryRequest(BaseModel):
     old_cypher: str
     new_question: str
     new_cypher: str
+    new_created_by: Optional[str] = None
 
 
 class CreateCategoryRequest(BaseModel):
@@ -216,9 +224,19 @@ async def get_queries(category: str):
         
         # Return the examples array
         examples = category_doc.get("examples", [])
+        updates = {}
         # Remove _id from each example if present
-        for example in examples:
+        for idx, example in enumerate(examples):
             example.pop("_id", None)
+            if not example.get("created_by"):
+                example["created_by"] = "ai"
+                updates[f"examples.{idx}.created_by"] = "ai"
+        
+        if updates:
+            query_collection.update_one(
+                {"category_name": category},
+                {"$set": updates}
+            )
         
         return {"queries": examples}
     except Exception as e:
@@ -230,13 +248,15 @@ async def add_query(request: AddQueryRequest):
     """Add a new query example to a category."""
     try:
         query_collection = get_query_examples_collection()
+        created_by = _normalize_created_by(request.created_by)
         
         # Create new query example
         added_at = datetime.now().isoformat()
         new_example = {
             "question": request.question,
             "cypher": request.cypher,
-            "added_at": added_at
+            "added_at": added_at,
+            "created_by": created_by,
         }
         
         # Find or create the category document
@@ -269,7 +289,8 @@ async def add_query(request: AddQueryRequest):
                 cypher=request.cypher,
                 category_name=request.category_name,
                 added_at=added_at,
-                category_description=category_description
+                category_description=category_description,
+                created_by=created_by,
             )
         except Exception as neo4j_error:
             # Log error but don't fail the request - MongoDB update succeeded
@@ -306,18 +327,22 @@ async def update_query(category: str, request: UpdateQueryRequest):
         
         # Update the query in MongoDB
         # Use arrayFilters to update the specific element in the array
+        update_fields = {
+            "examples.$.question": request.new_question,
+            "examples.$.cypher": request.new_cypher,
+        }
+        new_creator = None
+        if request.new_created_by is not None:
+            new_creator = _normalize_created_by(request.new_created_by)
+            update_fields["examples.$.created_by"] = new_creator
+        
         result = query_collection.update_one(
             {
                 "category_name": category,
                 "examples.question": request.old_question,
                 "examples.cypher": request.old_cypher
             },
-            {
-                "$set": {
-                    "examples.$.question": request.new_question,
-                    "examples.$.cypher": request.new_cypher
-                }
-            }
+            {"$set": update_fields}
         )
         
         if result.modified_count == 0:
@@ -333,12 +358,14 @@ async def update_query(category: str, request: UpdateQueryRequest):
             category_info = categories_collection.find_one({"category_name": category})
             category_description = category_info.get("category_description", "") if category_info else ""
             
+            creator_value = new_creator or _normalize_created_by(examples[query_index].get("created_by"))
             add_example_to_neo4j(
                 question=request.new_question,
                 cypher=request.new_cypher,
                 category_name=category,
                 added_at=examples[query_index].get("added_at", datetime.now().isoformat()),
-                category_description=category_description
+                category_description=category_description,
+                created_by=creator_value,
             )
         except Exception as neo4j_error:
             # Log error but don't fail the request - MongoDB update succeeded

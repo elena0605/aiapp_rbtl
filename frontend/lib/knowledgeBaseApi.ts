@@ -9,6 +9,7 @@ export interface QueryExample {
   question: string
   cypher: string
   added_at?: string
+  created_by?: string
 }
 
 export async function getCategories(): Promise<Category[]> {
@@ -34,7 +35,8 @@ export async function getQueriesByCategory(categoryName: string): Promise<QueryE
 export async function addQueryExample(
   categoryName: string,
   question: string,
-  cypher: string
+  cypher: string,
+  createdBy: string
 ): Promise<void> {
   const response = await fetch(`${API_URL}/api/knowledge-base/queries`, {
     method: 'POST',
@@ -45,6 +47,7 @@ export async function addQueryExample(
       category_name: categoryName,
       question,
       cypher,
+      created_by: createdBy,
     }),
   })
 
@@ -59,7 +62,8 @@ export async function updateQueryExample(
   oldQuestion: string,
   oldCypher: string,
   newQuestion: string,
-  newCypher: string
+  newCypher: string,
+  newCreatedBy: string
 ): Promise<void> {
   const params = new URLSearchParams({
     category: categoryName,
@@ -75,6 +79,7 @@ export async function updateQueryExample(
       old_cypher: oldCypher,
       new_question: newQuestion,
       new_cypher: newCypher,
+      new_created_by: newCreatedBy,
     }),
   })
 

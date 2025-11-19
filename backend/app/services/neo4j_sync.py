@@ -46,6 +46,7 @@ def add_example_to_neo4j(
     category_name: str,
     added_at: Optional[str] = None,
     category_description: Optional[str] = None,
+    created_by: Optional[str] = None,
     database: Optional[str] = None
 ) -> None:
     """Add a query example to Neo4j vector store.
@@ -77,7 +78,8 @@ def add_example_to_neo4j(
             n.embedding = $embedding,
             n.category_name = $category_name,
             n.category_description = $category_description,
-            n.added_at = $added_at
+            n.added_at = $added_at,
+            n.created_by = $created_by
         """
         session.run(upsert_query, {
             "question": question,
@@ -86,6 +88,7 @@ def add_example_to_neo4j(
             "category_name": category_name,
             "category_description": category_description or "",
             "added_at": added_at or "",
+            "created_by": created_by or "",
         })
 
 

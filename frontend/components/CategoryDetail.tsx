@@ -78,9 +78,14 @@ export default function CategoryDetail({ queries, categoryName, onDelete, onEdit
           <div className="mb-2">
             <CypherViewer cypher={query.cypher} />
           </div>
-          {query.added_at && (
-            <div className="text-xs text-gray-500 mt-2">
-              Added: {new Date(query.added_at).toLocaleString()}
+          {(query.added_at || query.created_by) && (
+            <div className="text-xs text-gray-500 mt-2 flex flex-wrap gap-4">
+              {query.added_at && (
+                <span>Added: {new Date(query.added_at).toLocaleString()}</span>
+              )}
+              {query.created_by && (
+                <span>Created by: {query.created_by}</span>
+              )}
             </div>
           )}
         </div>

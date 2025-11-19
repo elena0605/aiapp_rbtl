@@ -19,7 +19,7 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from backend.app.api import chat, health, knowledge_base
+from backend.app.api import chat, health, knowledge_base, graph_info
 from backend.app.services.graphrag import GraphRAGService
 
 # Load environment variables
@@ -49,6 +49,7 @@ graphrag_service = GraphRAGService()
 app.include_router(health.router, prefix="/api", tags=["health"])
 app.include_router(chat.router, prefix="/api", tags=["chat"])
 app.include_router(knowledge_base.router, prefix="/api", tags=["knowledge-base"])
+app.include_router(graph_info.router, prefix="/api", tags=["graph-info"])
 
 @app.get("/")
 async def root():

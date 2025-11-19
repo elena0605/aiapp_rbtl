@@ -37,7 +37,6 @@ export default function AddQueryForm({
       setError('Both question and Cypher query are required')
       return
     }
-
     setIsSubmitting(true)
     try {
       await onSubmit(question.trim(), cypher.trim())

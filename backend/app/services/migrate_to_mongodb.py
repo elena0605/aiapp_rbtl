@@ -145,7 +145,8 @@ def sync_to_neo4j():
                         cypher=example.get("cypher"),
                         category_name=category_name,
                         added_at=example.get("added_at"),
-                        category_description=category_description
+                        category_description=category_description,
+                        created_by=example.get("created_by")
                     )
                     total_synced += 1
                 except Exception as e:

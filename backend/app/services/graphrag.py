@@ -6,17 +6,74 @@ import sys
 from pathlib import Path
 from typing import Dict, Any, List, Optional, AsyncIterator
 import json
+import re
+from functools import lru_cache
+
+import yaml
 
 # Add project root to path (go up from backend/app/services/graphrag.py to project root)
 ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+PROMPTS_DIR = ROOT / "ai" / "prompts"
 
 from utils_neo4j import get_session
 from ai.schema.schema_utils import get_cached_schema, fetch_schema_from_neo4j
 from ai.terminology.loader import load as load_terminology, as_text as terminology_as_text
 from ai.fewshots.vector_store import get_vector_store
 from ai.llmops.langfuse_client import create_completion, get_prompt_from_langfuse
+
+
+_PROMPT_VAR_PATTERN = re.compile(r"{{\s*(\w+)\s*}}")
+
+
+class _LocalPrompt:
+    """Minimal prompt wrapper to mimic Langfuse prompt objects."""
+
+    def __init__(self, template: str, params: Optional[Dict[str, Any]] = None):
+        self._template = template
+        self.config = params or {}
+
+    def compile(self, **kwargs: Any) -> str:
+        def _replace(match: re.Match) -> str:
+            key = match.group(1)
+            value = kwargs.get(key, "")
+            if value is None:
+                return ""
+            if isinstance(value, (dict, list)):
+                return json.dumps(value, ensure_ascii=False)
+            return str(value)
+
+        return _PROMPT_VAR_PATTERN.sub(_replace, self._template)
+
+
+@lru_cache(maxsize=8)
+def _load_local_prompt(prompt_id: str) -> _LocalPrompt:
+    """Load a prompt definition from ai/prompts/*.yaml by its Langfuse ID."""
+    if not PROMPTS_DIR.exists():
+        raise RuntimeError(
+            f"Prompts directory '{PROMPTS_DIR}' not found. "
+            "Ensure ai/prompts exists for offline prompt usage."
+        )
+
+    for path in PROMPTS_DIR.glob("*.yaml"):
+        with path.open("r", encoding="utf-8") as handle:
+            data = yaml.safe_load(handle) or {}
+        if not isinstance(data, dict):
+            continue
+        if data.get("id") != prompt_id:
+            continue
+
+        template = data.get("template")
+        if not template:
+            raise RuntimeError(f"Prompt file '{path}' is missing a template section.")
+        params = data.get("params") or {}
+        return _LocalPrompt(template, params)
+
+    raise RuntimeError(
+        f"Prompt '{prompt_id}' not found in '{PROMPTS_DIR}'. "
+        "Run ai/prompts/sync or ensure the YAML file exists."
+    )
 
 
 class GraphRAGService:
@@ -52,13 +109,21 @@ class GraphRAGService:
             prompt_label = os.environ.get("PROMPT_LABEL")
             if not prompt_label:
                 raise RuntimeError("PROMPT_LABEL not set in .env")
-            
-            self._prompt = get_prompt_from_langfuse(
-                "graph.text_to_cypher",
-                langfuse_client=None,
-                label=prompt_label,
-            )
-            self._params = self._prompt.config or {}
+
+            try:
+                self._prompt = get_prompt_from_langfuse(
+                    "graph.text_to_cypher",
+                    langfuse_client=None,
+                    label=prompt_label,
+                )
+            except Exception as err:
+                print(
+                    f"Langfuse prompt fetch failed ({err}). Using local YAML fallback.",
+                    file=sys.stderr,
+                )
+                self._prompt = _load_local_prompt("graph.text_to_cypher")
+
+            self._params = getattr(self._prompt, "config", None) or {}
         return self._prompt, self._params
     
     async def process_question(
@@ -180,11 +245,19 @@ class GraphRAGService:
                     
                     if output_mode in {"chat", "both"}:
                         # Generate summary
-                        summary_prompt = get_prompt_from_langfuse(
-                            "graph-result-summarizer",
-                            label=os.environ.get("PROMPT_LABEL"),
-                        )
-                        summary_params = summary_prompt.config or {}
+                        try:
+                            summary_prompt = get_prompt_from_langfuse(
+                                "graph-result-summarizer",
+                                label=os.environ.get("PROMPT_LABEL"),
+                            )
+                        except Exception as err:
+                            print(
+                                f"Langfuse summary prompt fetch failed ({err}). "
+                                "Using local YAML fallback.",
+                                file=sys.stderr,
+                            )
+                            summary_prompt = _load_local_prompt("graph.result_summarizer")
+                        summary_params = getattr(summary_prompt, "config", None) or {}
                         summary_temp = float(summary_params.get("temperature", 0.0))
                         summary_max_tokens = int(summary_params.get("max_tokens", 600))
                         

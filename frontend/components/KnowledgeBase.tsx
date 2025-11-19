@@ -25,9 +25,14 @@ export interface QueryExample {
   question: string
   cypher: string
   added_at?: string
+  created_by?: string
 }
 
-export default function KnowledgeBase() {
+interface KnowledgeBaseProps {
+  selectedTester?: string | null
+}
+
+export default function KnowledgeBase({ selectedTester }: KnowledgeBaseProps) {
   const [categories, setCategories] = useState<Category[]>([])
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [queries, setQueries] = useState<QueryExample[]>([])
@@ -37,6 +42,7 @@ export default function KnowledgeBase() {
   const [editingQuery, setEditingQuery] = useState<QueryExample | null>(null)
   const [deletingCategory, setDeletingCategory] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const currentTester = selectedTester?.trim() || 'bojan'
 
   useEffect(() => {
     loadCategories()
@@ -87,9 +93,10 @@ export default function KnowledgeBase() {
 
   const handleAddQuery = async (question: string, cypher: string) => {
     if (!selectedCategory) return
+    const creator = selectedTester?.trim() || 'bojan'
 
     try {
-      await addQueryExample(selectedCategory, question, cypher)
+      await addQueryExample(selectedCategory, question, cypher, creator)
       // Reload queries for the category
       await loadQueries(selectedCategory)
       setShowAddForm(false)
@@ -120,6 +127,7 @@ export default function KnowledgeBase() {
 
   const handleUpdateQuery = async (question: string, cypher: string) => {
     if (!selectedCategory || !editingQuery) return
+    const creator = selectedTester?.trim() || editingQuery.created_by || 'bojan'
     
     try {
       await updateQueryExample(
@@ -127,7 +135,8 @@ export default function KnowledgeBase() {
         editingQuery.question,
         editingQuery.cypher,
         question,
-        cypher
+        cypher,
+        creator
       )
       await loadQueries(selectedCategory)
       setEditingQuery(null)
@@ -281,7 +290,7 @@ export default function KnowledgeBase() {
   return (
     <div className="flex flex-col h-full p-6 overflow-hidden">
       <div className="mb-6 flex-shrink-0">
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center justify-between mb-2 flex-wrap gap-4">
           <div>
             <h1 className="text-3xl font-bold text-gray-900 mb-2">Knowledge Base</h1>
             <p className="text-gray-600">

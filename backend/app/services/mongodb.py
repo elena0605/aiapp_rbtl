@@ -55,6 +55,12 @@ def get_categories_collection() -> Collection:
     return db["ai_query_categories"]
 
 
+def get_chat_sessions_collection() -> Collection:
+    """Get the chat_sessions collection."""
+    db = get_database()
+    return db["chat_sessions"]
+
+
 def close_connection():
     """Close MongoDB connection."""
     global _client, _db
