@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from neo4j import Driver  # type: ignore
 from openai import OpenAI  # type: ignore
+import logging
 
 try:
     from dotenv import load_dotenv  # type: ignore
@@ -38,6 +39,8 @@ from utils_neo4j import get_driver, get_session  # type: ignore
 # Load .env file at module level so environment variables are available for constants
 if load_dotenv is not None:
     load_dotenv(dotenv_path=str(ROOT / ".env"))
+
+logger = logging.getLogger("VectorStore")
 
 # Environment variables (must be set in .env file, no defaults)
 def _get_required_env(key: str) -> str:
@@ -75,6 +78,7 @@ class VectorStore:
             node_label: Label for nodes storing examples
             database: Neo4j database name (None for default)
         """
+        logger.info("VectorStore: constructor start")
         # Determine examples file path
         if examples_file is None:
             fewshots_dir = Path(__file__).resolve().parent
@@ -90,11 +94,18 @@ class VectorStore:
         if load_dotenv is not None:
             project_root = self.examples_file.resolve().parents[2]
             load_dotenv(dotenv_path=str(project_root / ".env"))
+        logger.info(
+            "VectorStore: initializing with examples=%s, model=%s, index=%s",
+            self.examples_file,
+            self.embedding_model,
+            self.index_name,
+        )
         
         # Initialize OpenAI client
         self.openai_client = None
         api_key = os.environ.get("OPENAI_API_KEY")
         if api_key:
+            logger.info("VectorStore: OpenAI client created for embedding model %s", self.embedding_model)
             self.openai_client = OpenAI(api_key=api_key)
         else:
             raise RuntimeError(
@@ -103,12 +114,22 @@ class VectorStore:
         
         # Get Neo4j driver
         self.driver = get_driver()
+        logger.info("VectorStore: Neo4j driver initialized")
         
         # Initialize vector index
+        logger.info("VectorStore: ensuring vector index %s on label %s", self.index_name, self.node_label)
         self._ensure_vector_index()
         
-        # Load and sync examples
-        self._load_and_sync_examples()
+        # Load and sync examples if enabled
+        sync_on_start = os.environ.get("VECTOR_SYNC_ON_START", "").lower() in {"1", "true", "yes"}
+        if sync_on_start:
+            logger.info("VectorStore: VECTOR_SYNC_ON_START enabled -> syncing examples")
+            self._load_and_sync_examples()
+        else:
+            logger.info(
+                "VectorStore: skipping example sync (VECTOR_SYNC_ON_START not enabled). "
+                "Assuming vector data already present in Neo4j."
+            )
     
     def _ensure_vector_index(self) -> None:
         """Create vector index if it doesn't exist."""
@@ -131,6 +152,7 @@ class VectorStore:
             exists = result.single() is not None
             
             if not exists:
+                logger.info("VectorStore: creating vector index %s (dim=%s)", self.index_name, embedding_dim)
                 # Create vector index
                 create_query = f"""
                 CREATE VECTOR INDEX {self.index_name}
@@ -157,6 +179,7 @@ class VectorStore:
                         ) from e
             else:
                 print(f"✓ Vector index '{self.index_name}' exists")
+                logger.info("VectorStore: vector index %s already exists", self.index_name)
     
     def _load_and_sync_examples(self) -> None:
         """Load examples from JSON and sync with Neo4j."""
@@ -194,13 +217,14 @@ class VectorStore:
                 "Ensure the file contains examples with 'question' and 'cypher' fields."
             )
         
-        print(f"Loaded {len(examples)} examples from {self.examples_file}")
+        logger.info("VectorStore: loaded %s examples from %s", len(examples), self.examples_file)
         
         # Sync with Neo4j
         self._sync_examples_to_neo4j(examples)
     
     def _sync_examples_to_neo4j(self, examples: List[Dict[str, Any]]) -> None:
         """Sync examples to Neo4j, updating embeddings if needed."""
+        logger.info("VectorStore: starting sync of %s examples into Neo4j", len(examples))
         with get_session(database=self.database) as session:
             # Get existing examples from Neo4j
             # Use OPTIONAL MATCH to avoid warnings if nodes don't exist yet
@@ -254,6 +278,7 @@ class VectorStore:
                         )
                         embedding = response.data[0].embedding
                     except Exception as e:
+                        logger.error("VectorStore: embedding generation failed for '%s': %s", question[:40], e)
                         print(f"⚠️  Error generating embedding for example: {e}")
                         continue
                     

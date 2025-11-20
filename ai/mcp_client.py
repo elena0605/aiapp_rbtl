@@ -1,303 +1,356 @@
-"""MCP Client for connecting to MCP servers like Neo4j GDS Agent.
+#!/usr/bin/env python3
+"""
+Example MCP client for connecting to the GDS Agent server.
 
-This module provides functionality to connect to MCP servers and use their tools.
-
-KNOWN ISSUE: The gds-agent MCP server currently has a bug where it connects to Neo4j
-but doesn't send the MCP initialization message, causing the client to hang.
-See MCP_ISSUE.md for details.
-
-Workaround: Use Neo4j GDS library directly instead of via MCP.
+This demonstrates how to connect to the MCP server as a client.
+The server uses stdio transport, so the client must start it as a subprocess.
 """
 
-from __future__ import annotations
-
 import asyncio
+import json
 import os
-import subprocess
+import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-
-try:
-    from dotenv import load_dotenv
-except ImportError:
-    load_dotenv = None
-
-try:
-    from mcp import ClientSession, StdioServerParameters
-    from mcp.client.stdio import stdio_client
-except ImportError:
-    ClientSession = None
-    StdioServerParameters = None
-    stdio_client = None
 
 
 class MCPClient:
-    """MCP Client for connecting to MCP servers."""
+    """Simple MCP client for communicating with the GDS Agent server via stdio."""
+
+    def __init__(self, process):
+        self.process = process
+        self.request_id = 0
+        self._stderr_task = None
     
-    def __init__(
-        self,
-        server_name: str,
-        command: str,
-        args: Optional[List[str]] = None,
-        env: Optional[Dict[str, str]] = None,
-    ):
-        """Initialize MCP client.
-        
-        Args:
-            server_name: Name of the MCP server
-            command: Command to run the MCP server (e.g., "uvx" or "python")
-            args: Arguments for the command (e.g., ["gds-agent"])
-            env: Environment variables to pass to the server
-        """
-        if ClientSession is None:
-            raise RuntimeError(
-                "MCP SDK not installed. Install with: pip install mcp"
-            )
-        
-        self.server_name = server_name
-        self.command = command
-        self.args = args or []
-        self.env = env or {}
-        self.session: Optional[ClientSession] = None
-        self._stdio_context = None
-        
-    async def connect(self) -> None:
-        """Connect to the MCP server."""
-        print(f"DEBUG: Creating server params with command: {self.command}, args: {self.args}")
-        server_params = StdioServerParameters(
-            command=self.command,
-            args=self.args,
-            env=self.env,
-        )
-        
-        print("DEBUG: Creating stdio_client...")
-        # stdio_client returns an async context manager
-        # We need to enter it and keep it alive
-        self._stdio_context = stdio_client(server_params)
-        print("DEBUG: Entering stdio context...")
-        stdio_transport = await self._stdio_context.__aenter__()
-        print(f"DEBUG: Got stdio_transport, type: {type(stdio_transport)}")
-        
-        # stdio_transport is a tuple of (read_stream, write_stream)
-        if isinstance(stdio_transport, tuple) and len(stdio_transport) == 2:
-            read_stream, write_stream = stdio_transport
-            print(f"DEBUG: Unpacked tuple - read_stream: {type(read_stream)}, write_stream: {type(write_stream)}")
-        else:
-            # If it's not a tuple, it might be the streams directly
-            read_stream, write_stream = stdio_transport, stdio_transport
-            print(f"DEBUG: Using transport directly as both streams: {type(stdio_transport)}")
-        
-        # Give the server a moment to start up and connect to Neo4j
-        # The server logs show it connects to Neo4j, but it might need time to initialize
-        print("DEBUG: Waiting 2 seconds for server to initialize...")
-        await asyncio.sleep(2)
-        
-        print("DEBUG: Creating ClientSession...")
-        self.session = ClientSession(read_stream, write_stream)
-        
-        # Initialize the session
-        # In MCP protocol, the CLIENT sends the initialization request
-        # ClientSession.initialize() sends the request and waits for server response
-        print("DEBUG: Initializing session (sending client init request, waiting for server response)...")
-        try:
-            # Add a timeout to see if it's truly hanging
-            init_result = await asyncio.wait_for(
-                self.session.initialize(),
-                timeout=15.0  # Increased timeout to 15 seconds
-            )
-            print(f"DEBUG: Session initialized successfully: {init_result}")
-        except asyncio.TimeoutError:
-            print("ERROR: Session initialization timed out after 15 seconds")
-            print("This might indicate the MCP server isn't sending its initialization message")
-            print("The server may be waiting for something or there's a protocol issue")
-            raise
-        except Exception as e:
-            print(f"ERROR: Session initialization failed: {type(e).__name__}: {e}")
-            raise
-    
-    async def list_tools(self) -> List[Dict[str, Any]]:
-        """List available tools from the MCP server.
-        
-        Returns:
-            List of tool definitions
-        """
-        if self.session is None:
-            print("DEBUG: Session is None, connecting...")
-            await self.connect()
-        
-        print("DEBUG: Calling session.list_tools()...")
-        result = await self.session.list_tools()
-        print(f"DEBUG: Got result from list_tools, type: {type(result)}")
-        print(f"DEBUG: Result has {len(result.tools)} tools")
-        return result.tools
-    
-    async def call_tool(
-        self,
-        tool_name: str,
-        arguments: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        """Call a tool on the MCP server.
-        
-        Args:
-            tool_name: Name of the tool to call
-            arguments: Arguments for the tool
-            
-        Returns:
-            Tool execution result
-        """
-        if self.session is None:
-            await self.connect()
-        
-        result = await self.session.call_tool(tool_name, arguments or {})
-        return result.content
-    
-    async def close(self) -> None:
-        """Close the connection to the MCP server."""
-        # ClientSession doesn't have a close() method - it's managed by the stdio context
-        # Just clear the reference
-        self.session = None
-        
-        # Exit the stdio context manager
-        if self._stdio_context:
+    async def close(self):
+        """Close the connection and stop the server."""
+        if self._stderr_task:
+            self._stderr_task.cancel()
             try:
-                await self._stdio_context.__aexit__(None, None, None)
-            except Exception as e:
-                print(f"DEBUG: Error closing stdio context: {e}")
-            self._stdio_context = None
+                await self._stderr_task
+            except asyncio.CancelledError:
+                pass
+        if self.process and self.process.returncode is None:
+            self.process.terminate()
+            await self.process.wait()
 
-
-class Neo4jGDSAgentClient(MCPClient):
-    """Client for Neo4j GDS Agent MCP server.
-    
-    This is a convenience wrapper for connecting to the Neo4j GDS Agent.
-    See: https://github.com/neo4j-contrib/gds-agent
-    """
-    
-    def __init__(
-        self,
-        neo4j_uri: Optional[str] = None,
-        neo4j_username: Optional[str] = None,
-        neo4j_password: Optional[str] = None,
-        neo4j_database: Optional[str] = None,
-        command: Optional[str] = None,
-        gds_agent_args: Optional[List[str]] = None,
-    ):
-        """Initialize Neo4j GDS Agent client.
-        
-        Args:
-            neo4j_uri: Neo4j URI (defaults to NEO4J_URI env var)
-            neo4j_username: Neo4j username (defaults to NEO4J_USERNAME or NEO4J_USER env var)
-            neo4j_password: Neo4j password (defaults to NEO4J_PASSWORD env var)
-            neo4j_database: Neo4j database name (optional)
-            command: Command to run gds-agent (default: "uvx")
-            gds_agent_args: Additional arguments for gds-agent
-        """
-        # Load .env file from project root
-        if load_dotenv is not None:
-            project_root = Path(__file__).resolve().parents[1]
-            load_dotenv(dotenv_path=str(project_root / ".env"))
-        
-        # Get Neo4j credentials from env if not provided
-        # Support both NEO4J_USERNAME and NEO4J_USER for compatibility
-        neo4j_uri = neo4j_uri or os.environ.get("NEO4J_URI")
-        neo4j_username = neo4j_username or os.environ.get("NEO4J_USERNAME") or os.environ.get("NEO4J_USER")
-        neo4j_password = neo4j_password or os.environ.get("NEO4J_PASSWORD")
-        neo4j_database = neo4j_database or os.environ.get("NEO4J_DATABASE")
-        
-        if not neo4j_uri or not neo4j_username or not neo4j_password:
-            raise ValueError(
-                "Neo4j credentials required. Set NEO4J_URI, NEO4J_USERNAME (or NEO4J_USER), "
-                "and NEO4J_PASSWORD in your .env file or pass them as arguments."
-            )
-        
-        # Build environment variables
-        env = {
-            "NEO4J_URI": neo4j_uri,
-            "NEO4J_USERNAME": neo4j_username,
-            "NEO4J_PASSWORD": neo4j_password,
+    async def send_request(self, method, params=None):
+        """Send a JSON-RPC request to the MCP server."""
+        self.request_id += 1
+        request = {
+            "jsonrpc": "2.0",
+            "id": self.request_id,
+            "method": method,
+            "params": params or {},
         }
-        if neo4j_database:
-            env["NEO4J_DATABASE"] = neo4j_database
+
+        # Send request
+        request_str = json.dumps(request) + "\n"
+        self.process.stdin.write(request_str.encode())
+        await self.process.stdin.drain()
+
+        # Read response - use readline with increased limit
+        # The subprocess limit is set to 10MB, so readline should handle large responses
+        try:
+            response_line = await asyncio.wait_for(
+                self.process.stdout.readline(),
+                timeout=60.0  # Longer timeout for graph operations
+            )
+        except asyncio.TimeoutError:
+            raise RuntimeError("Timeout waiting for response from MCP server")
+
+        if not response_line:
+            raise RuntimeError("No response from MCP server")
+
+        # Decode and parse response
+        try:
+            response_text = response_line.decode().strip()
+            response = json.loads(response_text)
+        except (UnicodeDecodeError, json.JSONDecodeError) as e:
+            raise RuntimeError(f"Failed to parse response: {e}")
+
+        return response
+
+    async def initialize(self):
+        """Initialize the MCP connection."""
+        response = await self.send_request(
+            "initialize",
+            {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "example-client", "version": "1.0.0"},
+            },
+        )
+
+        # Send initialized notification
+        notification = {"jsonrpc": "2.0", "method": "notifications/initialized"}
+        notification_str = json.dumps(notification) + "\n"
+        self.process.stdin.write(notification_str.encode())
+        await self.process.stdin.drain()
+
+        return response
+
+    async def list_tools(self):
+        """List available tools."""
+        response = await self.send_request("tools/list")
+        return response.get("result", {}).get("tools", [])
+
+    async def call_tool(self, name, arguments=None):
+        """Call a tool by name with arguments."""
+        response = await self.send_request(
+            "tools/call", {"name": name, "arguments": arguments or {}}
+        )
+        return response.get("result", {}).get("content", [])
+
+
+async def create_client(
+    neo4j_uri: str = None,
+    neo4j_user: str = None,
+    neo4j_password: str = None,
+) -> MCPClient:
+    """Create and initialize an MCP client connected to GDS Agent.
+    
+    Args:
+        neo4j_uri: Neo4j URI (defaults to NEO4J_URI env var)
+        neo4j_user: Neo4j username (defaults to NEO4J_USER or NEO4J_USERNAME env var)
+        neo4j_password: Neo4j password (defaults to NEO4J_PASSWORD env var)
+    
+    Returns:
+        Initialized MCPClient instance
         
-        # Determine command to use
-        # Try to find uvx, or use python -m gds_agent as fallback
-        if command is None:
-            import shutil
-            uvx_path = shutil.which("uvx")
-            if uvx_path:
-                command = uvx_path
-                args = gds_agent_args or ["gds-agent"]
-            else:
-                # Fallback to python -m if uvx not found
-                command = "python3"
-                args = gds_agent_args or ["-m", "gds_agent"]
-        else:
-            args = gds_agent_args or ["gds-agent"]
-        
-        super().__init__(
-            server_name="neo4j-gds",
-            command=command,
-            args=args,
-            env=env,
+    Example:
+        ```python
+        client = await create_client()
+        tools = await client.list_tools()
+        result = await client.call_tool("get_node_labels", {})
+        await client.close()  # Don't forget to close!
+        ```
+    """
+    from dotenv import load_dotenv
+    
+    project_root = Path(__file__).parent.parent
+    load_dotenv(project_root / ".env")
+    
+    # Get credentials from args or environment
+    neo4j_uri = neo4j_uri or os.environ.get("NEO4J_URI")
+    neo4j_user = neo4j_user or os.environ.get("NEO4J_USER") or os.environ.get("NEO4J_USERNAME", "neo4j")
+    neo4j_password = neo4j_password or os.environ.get("NEO4J_PASSWORD")
+    
+    if not neo4j_uri or not neo4j_password:
+        raise ValueError("NEO4J_URI and NEO4J_PASSWORD must be set in .env file or passed as arguments")
+    
+    # Find gds-agent executable
+    venv_bin = project_root / "venv" / "bin"
+    gds_agent = venv_bin / "gds-agent"
+    
+    if not gds_agent.exists():
+        raise FileNotFoundError(
+            f"gds-agent not found at {gds_agent}. "
+            "Please install the package in venv."
         )
     
-    async def run_graph_algorithm(
-        self,
-        algorithm_name: str,
-        **kwargs: Any,
-    ) -> Dict[str, Any]:
-        """Run a graph algorithm using the GDS Agent.
-        
-        Args:
-            algorithm_name: Name of the algorithm (e.g., "shortest_path", "pagerank")
-            **kwargs: Algorithm-specific parameters
-            
-        Returns:
-            Algorithm execution result
-        """
-        # The tool name format may vary, but typically it's the algorithm name
-        # You may need to list tools first to see the exact tool names
-        tools = await self.list_tools()
-        
-        # Find the matching tool
-        tool_name = None
-        for tool in tools:
-            if algorithm_name.lower() in tool.name.lower():
-                tool_name = tool.name
+    # Start the MCP server as a subprocess
+    proc = await asyncio.create_subprocess_exec(
+        str(gds_agent),
+        "--db-url", neo4j_uri,
+        "--username", neo4j_user,
+        "--password", neo4j_password,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        limit=1024 * 1024 * 10,  # 10MB buffer limit
+        env={**os.environ, "PYTHONUNBUFFERED": "1"},
+    )
+    
+    # Read stderr in background
+    async def read_stderr():
+        while True:
+            line = await proc.stderr.readline()
+            if not line:
                 break
-        
-        if tool_name is None:
-            available = [t.name for t in tools]
-            raise ValueError(
-                f"Algorithm '{algorithm_name}' not found. Available tools: {available}"
-            )
-        
-        return await self.call_tool(tool_name, kwargs)
-
-
-async def example_usage():
-    """Example usage of the MCP client."""
+    
+    stderr_task = asyncio.create_task(read_stderr())
+    
+    # Wait for server to initialize
+    await asyncio.sleep(2)
+    
+    # Check if process died
+    if proc.returncode is not None:
+        stderr_output = await proc.stderr.read()
+        raise RuntimeError(f"Server process died: {stderr_output.decode()}")
+    
     # Create client
-    client = Neo4jGDSAgentClient()
+    client = MCPClient(proc)
+    client._stderr_task = stderr_task
+    
+    # Initialize connection
+    await client.initialize()
+    
+    return client
+
+
+async def main():
+    """Main function demonstrating client usage."""
+    print("Starting MCP server and connecting...")
     
     try:
-        # Connect
-        await client.connect()
-        
+        client = await create_client()
+        print("✓ Connected to MCP server\n")
+    except Exception as e:
+        print(f"✗ Failed to connect: {e}")
+        sys.exit(1)
+
+    try:
         # List available tools
+        print("Fetching available tools...")
         tools = await client.list_tools()
-        print("Available tools:")
-        for tool in tools:
-            print(f"  - {tool.name}: {tool.description}")
-        
-        # Example: Run a graph algorithm
-        # result = await client.run_graph_algorithm("shortest_path", ...)
-        # print(result)
-        
-    finally:
+        print(f"✓ Found {len(tools)} tools\n")
+    except Exception as e:
+        print(f"✗ Failed to list tools: {e}")
         await client.close()
+        return
+
+    # Example: Get node labels (fast - uses direct Cypher query)
+    print("Example: Getting node labels from the graph...")
+    try:
+        result = await client.call_tool("get_node_labels", {})
+        if result:
+            result_text = result[0].get('text', 'No result')
+            print(f"Result: {result_text}\n")
+    except Exception as e:
+        print(f"✗ Tool call failed: {e}\n")
+    
+    # Example: Count nodes (may timeout on large databases - uses graph projection)
+    print("Example: Counting nodes in the graph...")
+    print("(This may take a moment or timeout if the database is very large)")
+    try:
+        result = await client.call_tool("count_nodes", {})
+        if result:
+            # Truncate long results for display
+            result_text = result[0].get('text', 'No result')
+            if len(result_text) > 200:
+                print(f"Result: {result_text[:200]}... (truncated)\n")
+            else:
+                print(f"Result: {result_text}\n")
+    except Exception as e:
+        print(f"Note: Tool call timed out or failed: {e}")
+        print("This is normal if the database query takes longer than 60 seconds.")
+        print("The server connection is working - you can see it listed tools above.\n")
+
+    # Example: List a few tool names
+    print("Available tools (first 10):")
+    for tool in tools[:10]:
+        print(f"  - {tool.get('name')}")
+    
+    print(f"\nTotal tools available: {len(tools)}")
+    print("\n✓ Client connection test successful!")
+    print("  The server is running and responding to requests.")
+    print("  Tool calls may take time depending on your database size.")
+
+    # Cleanup
+    print("\nClosing connection...")
+    await client.close()
+    print("✓ Done")
+
+
+async def interactive_mode():
+    """Interactive mode for testing tools continuously."""
+    print("=" * 60)
+    print("MCP Client - Interactive Mode")
+    print("=" * 60)
+    print("\nStarting server and connecting...")
+    
+    client = await create_client()
+    print("✓ Connected to MCP server\n")
+    
+    try:
+        # List tools once
+        tools = await client.list_tools()
+        print(f"Available tools: {len(tools)}")
+        print("\nFirst 10 tools:")
+        for tool in tools[:10]:
+            print(f"  - {tool.get('name')}")
+        print(f"\n... and {len(tools) - 10} more\n")
+        
+        # Interactive loop
+        print("=" * 60)
+        print("Interactive Tool Testing")
+        print("=" * 60)
+        print("Commands:")
+        print("  list                    - List all available tools")
+        print("  call <name> [args]      - Call a tool (args as JSON)")
+        print("  help <name>             - Show tool details")
+        print("  quit                    - Exit")
+        print()
+        
+        while True:
+            try:
+                command = input("mcp> ").strip()
+                
+                if not command:
+                    continue
+                
+                if command == "quit" or command == "exit":
+                    break
+                
+                elif command == "list":
+                    print(f"\nAvailable tools ({len(tools)}):")
+                    for i, tool in enumerate(tools, 1):
+                        name = tool.get('name', 'unknown')
+                        desc = tool.get('description', 'No description')
+                        print(f"  {i:2d}. {name}")
+                        if desc:
+                            print(f"      {desc[:80]}")
+                    print()
+                
+                elif command.startswith("call "):
+                    parts = command[5:].strip().split(None, 1)
+                    tool_name = parts[0]
+                    args_str = parts[1] if len(parts) > 1 else "{}"
+                    
+                    try:
+                        args = json.loads(args_str)
+                        print(f"\nCalling {tool_name} with args: {args}")
+                        result = await client.call_tool(tool_name, args)
+                        print(f"Result: {json.dumps(result, indent=2)}\n")
+                    except json.JSONDecodeError as e:
+                        print(f"Error: Invalid JSON in arguments: {e}\n")
+                    except Exception as e:
+                        print(f"Error: {e}\n")
+                
+                elif command.startswith("help "):
+                    tool_name = command[5:].strip()
+                    tool = next((t for t in tools if t.get('name') == tool_name), None)
+                    if tool:
+                        print(f"\nTool: {tool.get('name')}")
+                        print(f"Description: {tool.get('description', 'No description')}")
+                        if 'inputSchema' in tool:
+                            print(f"Schema: {json.dumps(tool['inputSchema'], indent=2)}")
+                        print()
+                    else:
+                        print(f"Tool '{tool_name}' not found\n")
+                
+                else:
+                    print(f"Unknown command: {command}")
+                    print("Type 'quit' to exit\n")
+            
+            except KeyboardInterrupt:
+                print("\n\nExiting...")
+                break
+            except EOFError:
+                break
+    
+    finally:
+        print("\nClosing connection...")
+        await client.close()
+        print("✓ Done")
 
 
 if __name__ == "__main__":
-    asyncio.run(example_usage())
+    import sys
+    
+    # Check for interactive mode flag
+    if len(sys.argv) > 1 and sys.argv[1] == "--interactive":
+        asyncio.run(interactive_mode())
+    else:
+        asyncio.run(main())
 

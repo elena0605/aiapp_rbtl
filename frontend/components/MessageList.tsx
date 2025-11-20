@@ -5,6 +5,30 @@ import CypherViewer from './CypherViewer'
 import ResultsTable from './ResultsTable'
 import { Trash2, Star } from 'lucide-react'
 
+function formatDateSeparator(date: Date): string {
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const messageDate = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+  const yesterday = new Date(today)
+  yesterday.setDate(yesterday.getDate() - 1)
+  
+  const messageDateOnly = new Date(messageDate.getFullYear(), messageDate.getMonth(), messageDate.getDate())
+  const yesterdayOnly = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate())
+  const todayOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+  
+  if (messageDateOnly.getTime() === todayOnly.getTime()) {
+    return 'Today'
+  } else if (messageDateOnly.getTime() === yesterdayOnly.getTime()) {
+    return 'Yesterday'
+  } else {
+    return date.toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' })
+  }
+}
+
+function getDateKey(date: Date): string {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).toISOString()
+}
+
 interface MessageListProps {
   messages: Message[]
   onDeleteMessage?: (id: string) => void
@@ -31,11 +55,22 @@ export default function MessageList({
 
   return (
     <div className="space-y-4">
-      {messages.map((message) => (
-        <div
-          key={message.id}
-          className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
-        >
+      {messages.map((message, index) => {
+        const showDateSeparator = index === 0 || 
+          getDateKey(message.timestamp) !== getDateKey(messages[index - 1].timestamp)
+        
+        return (
+          <div key={message.id}>
+            {showDateSeparator && (
+              <div className="flex items-center justify-center my-4">
+                <div className="bg-gray-200 text-gray-600 text-xs px-3 py-1 rounded-full">
+                  {formatDateSeparator(message.timestamp)}
+                </div>
+              </div>
+            )}
+            <div
+              className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+            >
           <div
             className={`relative max-w-[80%] rounded-lg p-4 break-words overflow-hidden ${
               message.role === 'user'
@@ -48,6 +83,16 @@ export default function MessageList({
                 {message.role === 'user' ? 'You' : 'Assistant'}
               </div>
               <div className="flex items-center gap-2">
+                <span className={`text-xs ${
+                  message.role === 'user' 
+                    ? 'text-white/80' 
+                    : 'text-gray-500'
+                }`}>
+                  {message.timestamp.toLocaleTimeString('en-US', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
+                </span>
                 {message.role === 'assistant' && onToggleFavorite && message.id && (
                   <button
                     onClick={() => onToggleFavorite(message.id, !message.isFavorite)}
@@ -107,6 +152,24 @@ export default function MessageList({
               </div>
             )}
             
+            {message.timings && message.role === 'assistant' && (
+              <div className="mt-3 text-xs">
+                <div className="font-semibold mb-1">Query timings:</div>
+                <ul className="space-y-1">
+                  {Object.entries(message.timings).map(([key, value]) => (
+                    <li key={key} className="flex justify-between items-center">
+                      <span className="text-gray-600">
+                        {key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}:
+                      </span>
+                      <span className="font-mono text-gray-800 ml-2">
+                        {typeof value === 'number' ? `${value.toFixed(2)}s` : value}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            
             {message.results && message.results.length > 0 && (
               <div className="mt-3 max-w-full overflow-x-auto">
                 <ResultsTable results={message.results} />
@@ -120,7 +183,8 @@ export default function MessageList({
             )}
           </div>
         </div>
-      ))}
+        </div>
+      )})}
     </div>
   )
 }

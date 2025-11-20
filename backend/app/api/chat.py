@@ -35,6 +35,7 @@ class ChatMessage(BaseModel):
     error: Optional[str] = None
     timestamp: datetime
     is_favorite: bool = False
+    timings: Optional[Dict[str, float]] = None
 
 
 class ChatHistoryResponse(BaseModel):
@@ -68,6 +69,8 @@ class ChatResponse(BaseModel):
     summary: Optional[str] = None
     examples_used: Optional[List[Dict[str, Any]]] = None
     error: Optional[str] = None
+    timings: Optional[Dict[str, float]] = None
+    message_id: Optional[str] = None
 
 
 class FavoriteRequest(BaseModel):
@@ -180,10 +183,12 @@ async def chat(request: ChatRequest):
             "error": result.get("error"),
             "timestamp": datetime.utcnow(),
             "is_favorite": False,
+            "timings": result.get("timings"),
         }
         history_messages.append(assistant_message)
 
         result["username"] = username
+        result["message_id"] = assistant_message["id"]
         return ChatResponse(**result)
     except Exception as e:
         error_message = {

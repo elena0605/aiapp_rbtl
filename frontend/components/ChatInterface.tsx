@@ -24,18 +24,36 @@ export interface Message {
   error?: string
   timestamp: Date
   isFavorite?: boolean
+  timings?: Record<string, number>
 }
 
 interface ChatInterfaceProps {
   selectedUser: string | null
   isUserSelectionReady: boolean
   userLoadError?: string | null
+  onProcessingChange?: (isProcessing: boolean) => void
 }
+
+const PROCESS_STEPS = [
+  'Getting similar queries',
+  'Generating Cypher',
+  'Querying knowledge base',
+  'Generating final response',
+]
+
+const STEP_DURATION_MS = 2500
+const STEP_TIMING_KEYS: Array<keyof NonNullable<ChatResponse['timings']>> = [
+  'similar_queries',
+  'generate_cypher',
+  'query_knowledge_base',
+  'generate_final_response',
+]
 
 export default function ChatInterface({
   selectedUser,
   isUserSelectionReady,
   userLoadError,
+  onProcessingChange,
 }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [isLoading, setIsLoading] = useState(false)
@@ -43,7 +61,17 @@ export default function ChatInterface({
   const [deletingMessageId, setDeletingMessageId] = useState<string | null>(null)
   const [historyError, setHistoryError] = useState<string | null>(null)
   const [favoriteUpdatingId, setFavoriteUpdatingId] = useState<string | null>(null)
+  const [processingStepIndex, setProcessingStepIndex] = useState<number | null>(null)
+  const [stepDurations, setStepDurations] = useState<number[]>(
+    () => PROCESS_STEPS.map(() => 0)
+  )
+  const [currentStepElapsed, setCurrentStepElapsed] = useState(0)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const processingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const elapsedIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const activeRequestControllerRef = useRef<AbortController | null>(null)
+  const stepStartTimeRef = useRef<number | null>(null)
+  const previousStepIndexRef = useRef<number | null>(null)
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -52,6 +80,131 @@ export default function ChatInterface({
   useEffect(() => {
     scrollToBottom()
   }, [messages])
+
+  useEffect(() => {
+    if (isLoading) {
+      setStepDurations(PROCESS_STEPS.map(() => 0))
+      setCurrentStepElapsed(0)
+      setProcessingStepIndex(0)
+      previousStepIndexRef.current = null
+      stepStartTimeRef.current = performance.now()
+
+      if (processingIntervalRef.current) {
+        clearInterval(processingIntervalRef.current)
+      }
+      processingIntervalRef.current = setInterval(() => {
+        setProcessingStepIndex((prev) => {
+          if (prev === null) return prev
+          if (prev >= PROCESS_STEPS.length - 1) {
+            return prev
+          }
+          return prev + 1
+        })
+      }, STEP_DURATION_MS)
+
+      if (elapsedIntervalRef.current) {
+        clearInterval(elapsedIntervalRef.current)
+      }
+      elapsedIntervalRef.current = setInterval(() => {
+        if (stepStartTimeRef.current !== null) {
+          setCurrentStepElapsed(
+            (performance.now() - stepStartTimeRef.current) / 1000
+          )
+        }
+      }, 200)
+    } else {
+      if (processingIntervalRef.current) {
+        clearInterval(processingIntervalRef.current)
+        processingIntervalRef.current = null
+      }
+      if (elapsedIntervalRef.current) {
+        clearInterval(elapsedIntervalRef.current)
+        elapsedIntervalRef.current = null
+      }
+      if (processingStepIndex !== null && stepStartTimeRef.current !== null) {
+        const finalDuration =
+          (performance.now() - stepStartTimeRef.current) / 1000
+        setStepDurations((prev) => {
+          const next = [...prev]
+          next[processingStepIndex] = finalDuration
+          return next
+        })
+      }
+      setProcessingStepIndex(null)
+      previousStepIndexRef.current = null
+      stepStartTimeRef.current = null
+      setCurrentStepElapsed(0)
+    }
+
+    return () => {
+      if (processingIntervalRef.current) {
+        clearInterval(processingIntervalRef.current)
+        processingIntervalRef.current = null
+      }
+      if (elapsedIntervalRef.current) {
+        clearInterval(elapsedIntervalRef.current)
+        elapsedIntervalRef.current = null
+      }
+    }
+  }, [isLoading])
+
+  useEffect(() => {
+    if (!isLoading) return
+    if (processingStepIndex === null) return
+
+    const prev = previousStepIndexRef.current
+    if (prev !== null && processingStepIndex > prev && stepStartTimeRef.current !== null) {
+      const duration =
+        (performance.now() - stepStartTimeRef.current) / 1000
+      setStepDurations((prevDurations) => {
+        const next = [...prevDurations]
+        next[prev] = duration
+        return next
+      })
+      stepStartTimeRef.current = performance.now()
+      setCurrentStepElapsed(0)
+    } else if (prev === null) {
+      stepStartTimeRef.current = performance.now()
+      setCurrentStepElapsed(0)
+    }
+    previousStepIndexRef.current = processingStepIndex
+  }, [processingStepIndex, isLoading])
+
+  useEffect(() => {
+    onProcessingChange?.(isLoading)
+  }, [isLoading, onProcessingChange])
+
+  const cancelActiveRequest = (reason?: string) => {
+    if (activeRequestControllerRef.current) {
+      activeRequestControllerRef.current.abort()
+      activeRequestControllerRef.current = null
+    }
+    if (reason) {
+      const cancelMessage: Message = {
+        id: (Date.now() + Math.random()).toString(),
+        role: 'assistant',
+        content: reason,
+        timestamp: new Date(),
+        isFavorite: false,
+      }
+      setMessages((prev) => [...prev, cancelMessage])
+    }
+    setIsLoading(false)
+  }
+
+  useEffect(() => {
+    if (isLoading) {
+      cancelActiveRequest('Request cancelled due to tester change.')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedUser])
+
+  useEffect(() => {
+    return () => {
+      cancelActiveRequest()
+    }
+  }, [])
+
 
   const transformMessageRecord = (record: ChatMessageRecord): Message => ({
     id: record.id || `${record.timestamp}-${record.role}`,
@@ -64,6 +217,7 @@ export default function ChatInterface({
     error: record.error,
     timestamp: new Date(record.timestamp),
     isFavorite: record.is_favorite,
+    timings: (record as any).timings, // Timings might be stored in the record
   })
 
   useEffect(() => {
@@ -106,6 +260,9 @@ export default function ChatInterface({
       setHistoryError('Please select a tester account before chatting.')
       return
     }
+    if (isLoading) {
+      cancelActiveRequest()
+    }
     // Add user message
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -117,11 +274,20 @@ export default function ChatInterface({
     setMessages((prev) => [...prev, userMessage])
     setIsLoading(true)
 
+    const controller = new AbortController()
+    activeRequestControllerRef.current = controller
+
     try {
-      const response: ChatResponse = await sendMessage(question, selectedUser)
+      const response: ChatResponse = await sendMessage(
+        question,
+        selectedUser,
+        true,
+        'chat',
+        controller.signal
+      )
       
       const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
+        id: response.message_id || (Date.now() + 1).toString(),
         role: 'assistant',
         content: response.summary || 'Query executed successfully',
         cypher: response.cypher,
@@ -131,10 +297,23 @@ export default function ChatInterface({
         error: response.error,
         timestamp: new Date(),
         isFavorite: false,
+        timings: response.timings,
       }
       
       setMessages((prev) => [...prev, assistantMessage])
-    } catch (error) {
+
+      if (response.timings) {
+        const backendDurations = STEP_TIMING_KEYS.map((key) => {
+          const value = response.timings?.[key]
+          return typeof value === 'number' && isFinite(value) ? value : 0
+        })
+        setStepDurations(backendDurations)
+      }
+    } catch (error: any) {
+      if (error?.code === 'ERR_CANCELED') {
+        // cancellation already handled
+        return
+      }
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
@@ -145,6 +324,9 @@ export default function ChatInterface({
       }
       setMessages((prev) => [...prev, errorMessage])
     } finally {
+      if (activeRequestControllerRef.current === controller) {
+        activeRequestControllerRef.current = null
+      }
       setIsLoading(false)
     }
   }
@@ -207,9 +389,41 @@ export default function ChatInterface({
           favoriteUpdatingId={favoriteUpdatingId}
         />
         {isLoading && (
-          <div className="flex items-center space-x-2 text-gray-500">
-            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-900"></div>
-            <span>Processing...</span>
+          <div className="w-full max-w-md bg-gray-50 border border-gray-200 rounded-lg p-4 space-y-3 text-sm text-gray-600">
+            <div className="flex items-center space-x-2 font-medium text-gray-700">
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-700"></div>
+              <span>Processing your question...</span>
+            </div>
+            <ol className="space-y-2">
+              {PROCESS_STEPS.map((step, index) => {
+                const isComplete =
+                  processingStepIndex !== null && index < processingStepIndex
+                const isCurrent = processingStepIndex === index
+                const statusClass = isComplete
+                  ? 'bg-green-500'
+                  : isCurrent
+                  ? 'bg-blue-500 animate-pulse'
+                  : 'bg-gray-300'
+                return (
+                  <li key={step} className="flex items-center space-x-2">
+                    <span
+                      className={`h-2.5 w-2.5 rounded-full inline-block ${statusClass}`}
+                    ></span>
+                    <span
+                      className={
+                        isComplete
+                          ? 'text-gray-700'
+                          : isCurrent
+                          ? 'text-gray-800'
+                          : 'text-gray-400'
+                      }
+                    >
+                      {step}
+                    </span>
+                  </li>
+                )
+              })}
+            </ol>
           </div>
         )}
         {isLoadingHistory && (

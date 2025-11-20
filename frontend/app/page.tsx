@@ -14,6 +14,7 @@ export default function Home() {
   const [selectedTester, setSelectedTester] = useState<string | null>(null)
   const [isLoadingTesters, setIsLoadingTesters] = useState(false)
   const [testerError, setTesterError] = useState<string | null>(null)
+  const [isChatProcessing, setIsChatProcessing] = useState(false)
 
   useEffect(() => {
     const loadTesters = async () => {
@@ -50,6 +51,7 @@ export default function Home() {
         onTesterChange={setSelectedTester}
         isLoadingTesters={isLoadingTesters}
         testerError={testerError}
+        isTesterSelectionDisabled={isChatProcessing}
       />
       
       {/* Main Content Area (3/4 of screen) */}
@@ -61,6 +63,7 @@ export default function Home() {
                 selectedUser={selectedTester}
                 isUserSelectionReady={!isLoadingTesters && !testerError}
                 userLoadError={testerError}
+                onProcessingChange={setIsChatProcessing}
               />
             </div>
           </div>

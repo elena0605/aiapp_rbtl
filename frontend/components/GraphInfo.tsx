@@ -1,13 +1,17 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import {
   fetchGraphInfo,
+  fetchGraphVisualization,
   GraphInfoResponse,
   GraphNodeInfo,
   GraphRelationshipInfo,
+  GraphVisualizationResponse,
 } from '@/lib/api'
 import { Copy, AlertCircle, ChevronRight } from 'lucide-react'
+import { Network as VisNetwork } from 'vis-network'
+import 'vis-network/styles/vis-network.min.css'
 
 export default function GraphInfo() {
   const [info, setInfo] = useState<GraphInfoResponse | null>(null)
@@ -17,6 +21,10 @@ export default function GraphInfo() {
   const [selectedNode, setSelectedNode] = useState<GraphNodeInfo | null>(null)
   const [selectedRelationship, setSelectedRelationship] =
     useState<GraphRelationshipInfo | null>(null)
+  const [visualization, setVisualization] = useState<GraphVisualizationResponse | null>(null)
+  const [vizError, setVizError] = useState<string | null>(null)
+  const networkRef = useRef<HTMLDivElement>(null)
+  const visNetworkRef = useRef<VisNetwork | null>(null)
 
   useEffect(() => {
     const load = async () => {
@@ -37,6 +45,186 @@ export default function GraphInfo() {
     }
     load()
   }, [])
+
+  useEffect(() => {
+    const loadViz = async () => {
+      try {
+        const data = await fetchGraphVisualization()
+        setVisualization(data)
+      } catch (err) {
+        // Don't show error if visualization file doesn't exist
+        if (err instanceof Error && err.message.includes('404')) {
+          setVizError(null)
+        } else {
+          setVizError(
+            `Unable to load visualization${
+              err instanceof Error ? `: ${err.message}` : ''
+            }`
+          )
+        }
+      }
+    }
+    loadViz()
+  }, [])
+
+  useEffect(() => {
+    if (!visualization || !networkRef.current) return
+
+    // Clean up previous network instance
+    if (visNetworkRef.current) {
+      visNetworkRef.current.destroy()
+    }
+
+    try {
+      // Handle Neo4j db.schema.visualization() format:
+      // nodes: [{name: "NodeName", indexes: [], constraints: []}, ...]
+      // relationships: [[startNode, "REL_TYPE", endNode], ...]
+      const nodeMap = new Map<string, string>()
+      
+      // Filter out QueryExample nodes
+      const nodes = (visualization.nodes || [])
+        .filter((node: any) => {
+          const nodeName = node.name || ''
+          return nodeName !== 'QueryExample'
+        })
+        .map((node: any, index: number) => {
+          const nodeName = node.name || `Node${index}`
+          const nodeId = nodeName // Use name as ID
+          nodeMap.set(nodeName, nodeId)
+          
+          return {
+            id: nodeId,
+            label: nodeName,
+            title: `${nodeName}\nIndexes: ${node.indexes?.length || 0}\nConstraints: ${node.constraints?.length || 0}`,
+            color: {
+              background: '#e3f2fd',
+              border: '#1976d2',
+              highlight: { background: '#bbdefb', border: '#0d47a1' },
+            },
+          }
+        })
+
+      const edges: any[] = []
+      const relationships = visualization.relationships || []
+      
+      relationships.forEach((rel: any, index: number) => {
+        // Format: [startNode, "REL_TYPE", endNode]
+        if (Array.isArray(rel) && rel.length >= 3) {
+          const startNode = rel[0]
+          const relType = rel[1]
+          const endNode = rel[2]
+          
+          const startName = startNode?.name || String(startNode)
+          const endName = endNode?.name || String(endNode)
+          
+          // Skip relationships involving QueryExample
+          if (startName === 'QueryExample' || endName === 'QueryExample') {
+            return
+          }
+          
+          const relTypeStr = String(relType)
+          
+          // Ensure both nodes exist in our node map
+          if (!nodeMap.has(startName)) {
+            nodeMap.set(startName, startName)
+            nodes.push({
+              id: startName,
+              label: startName,
+              title: startName,
+              color: {
+                background: '#e3f2fd',
+                border: '#1976d2',
+                highlight: { background: '#bbdefb', border: '#0d47a1' },
+              },
+            })
+          }
+          
+          if (!nodeMap.has(endName)) {
+            nodeMap.set(endName, endName)
+            nodes.push({
+              id: endName,
+              label: endName,
+              title: endName,
+              color: {
+                background: '#e3f2fd',
+                border: '#1976d2',
+                highlight: { background: '#bbdefb', border: '#0d47a1' },
+              },
+            })
+          }
+          
+          edges.push({
+            id: `edge-${index}`,
+            from: startName,
+            to: endName,
+            label: relTypeStr,
+            arrows: 'to',
+            color: { color: '#9c27b0', highlight: '#7b1fa2' },
+            length: 800, // Doubled edge length for more spacing
+          })
+        }
+      })
+
+      if (nodes.length === 0 && edges.length === 0) {
+        return
+      }
+
+      const data = { nodes, edges }
+      const options = {
+        nodes: {
+          shape: 'box',
+          font: { size: 28 }, // Doubled from 14
+          margin: 40, // Doubled from 20 for bigger nodes
+        },
+        edges: {
+          font: { size: 24, align: 'middle' }, // Doubled from 12
+          smooth: { type: 'curvedCW', roundness: 0.2 },
+          length: 400, // Doubled from 200
+        },
+        physics: {
+          enabled: true,
+          stabilization: { 
+            iterations: 200,
+            updateInterval: 25,
+          },
+          barnesHut: {
+            gravitationalConstant: -6000, // Doubled repulsion for more space
+            centralGravity: 0.1,
+            springLength: 800, // Doubled from 400 for double spacing
+            springConstant: 0.04,
+            damping: 0.09,
+            avoidOverlap: 1, // Strong overlap avoidance
+          },
+        },
+        interaction: {
+          hover: true,
+          tooltipDelay: 100,
+          dragNodes: true, // Allow dragging nodes
+          dragView: true, // Allow panning
+          zoomView: true, // Allow zooming
+        },
+      }
+
+      visNetworkRef.current = new VisNetwork(networkRef.current, data, options)
+      
+      // Disable physics after stabilization to keep graph static
+      visNetworkRef.current.on('stabilizationEnd', () => {
+        if (visNetworkRef.current) {
+          visNetworkRef.current.setOptions({ physics: false })
+        }
+      })
+    } catch (err) {
+      console.error('Error rendering visualization:', err)
+      setVizError(`Failed to render visualization: ${err instanceof Error ? err.message : String(err)}`)
+    }
+
+    return () => {
+      if (visNetworkRef.current) {
+        visNetworkRef.current.destroy()
+        visNetworkRef.current = null
+      }
+    }
+  }, [visualization])
 
   const handleCopy = async () => {
     if (!info) return
@@ -142,6 +330,24 @@ export default function GraphInfo() {
           </p>
         </div>
       </section>
+
+      {visualization && (
+        <section className="space-y-4">
+          <h2 className="text-xl font-semibold text-gray-900">Schema Visualization</h2>
+          {vizError && (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-700 text-sm">
+              {vizError}
+            </div>
+          )}
+          <div className="rounded-lg border border-gray-200 bg-white p-4">
+            <div
+              ref={networkRef}
+              className="w-full"
+              style={{ height: '600px', minHeight: '600px' }}
+            />
+          </div>
+        </section>
+      )}
 
       <section className="space-y-4">
         <div className="flex items-center justify-between">

@@ -14,6 +14,8 @@ export interface ChatResponse {
     similarity?: number
   }>
   error?: string
+  timings?: Record<string, number>
+  message_id?: string
 }
 
 export interface ChatMessageRecord {
@@ -27,6 +29,7 @@ export interface ChatMessageRecord {
   error?: string
   timestamp: string
   is_favorite?: boolean
+  timings?: Record<string, number>
 }
 
 export interface ChatHistoryResponse {
@@ -83,14 +86,21 @@ export async function sendMessage(
   question: string,
   username: string,
   executeCypher: boolean = true,
-  outputMode: 'json' | 'chat' | 'both' = 'chat'
+  outputMode: 'json' | 'chat' | 'both' = 'chat',
+  signal?: AbortSignal
 ): Promise<ChatResponse> {
-  const response = await axios.post<ChatResponse>(`${API_URL}/api/chat`, {
-    username,
-    question,
-    execute_cypher: executeCypher,
-    output_mode: outputMode,
-  })
+  const response = await axios.post<ChatResponse>(
+    `${API_URL}/api/chat`,
+    {
+      username,
+      question,
+      execute_cypher: executeCypher,
+      output_mode: outputMode,
+    },
+    {
+      signal,
+    }
+  )
   return response.data
 }
 
@@ -131,6 +141,19 @@ export async function toggleFavoriteMessage(
 
 export async function fetchGraphInfo(): Promise<GraphInfoResponse> {
   const response = await axios.get<GraphInfoResponse>(`${API_URL}/api/graph-info`)
+  return response.data
+}
+
+export interface GraphVisualizationResponse {
+  nodes?: any[]
+  relationships?: any[]
+  [key: string]: any
+}
+
+export async function fetchGraphVisualization(): Promise<GraphVisualizationResponse> {
+  const response = await axios.get<GraphVisualizationResponse>(
+    `${API_URL}/api/graph-visualization`
+  )
   return response.data
 }
 

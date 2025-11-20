@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 import json
+import logging
 
 # Add project root to path (go up from backend/app/main.py to project root)
 ROOT = Path(__file__).resolve().parents[2]
@@ -25,6 +26,12 @@ from backend.app.services.graphrag import GraphRAGService
 # Load environment variables
 from dotenv import load_dotenv
 load_dotenv(dotenv_path=str(ROOT / ".env"))
+
+# Configure logging globally so GraphRAG info logs are visible
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+)
 
 app = FastAPI(
     title="GraphRAG API",

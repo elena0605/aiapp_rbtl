@@ -1,11 +1,18 @@
 """Graph information endpoints providing schema and terminology overviews."""
 
+import json
+from pathlib import Path
+
 from fastapi import APIRouter, HTTPException
 
 from ai.schema.schema_utils import load_cached_schema
 from ai.terminology.loader import load as load_terminology, as_text as terminology_as_text
 
 router = APIRouter()
+
+# Calculate path to project root: backend/app/api/graph_info.py -> go up 3 levels
+SCHEMA_DIR = Path(__file__).resolve().parents[3] / "ai" / "schema"
+VISUALIZATION_FILE = SCHEMA_DIR / "visualization.json"
 
 
 def _parse_schema(schema_text: str):
@@ -134,4 +141,27 @@ async def get_graph_info():
         "graph_ready": bool(relationships),
         "summary": summary,
     }
+
+
+@router.get("/graph-visualization")
+async def get_graph_visualization():
+    """Return the static schema visualization JSON file."""
+    if not VISUALIZATION_FILE.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Schema visualization not found. Please run "
+                "python generate_schema_visualization.py to generate it."
+            ),
+        )
+    
+    try:
+        with open(VISUALIZATION_FILE, "r") as f:
+            data = json.load(f)
+        return data
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to load visualization: {str(e)}",
+        )
 

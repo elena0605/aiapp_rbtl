@@ -306,17 +306,23 @@ This project can connect as an MCP client to other MCP servers, such as the [Neo
 
 2. **Use the MCP client**:
    ```bash
-   python ai/gds_agent.py
+   # Normal mode (one-time test)
+   python ai/mcp_client.py
+   
+   # Interactive mode (continuous testing)
+   python ai/mcp_client.py --interactive
    ```
    
    Or use it in your code:
    ```python
-   from ai.mcp_client import Neo4jGDSAgentClient
+   from ai.mcp_client import create_client
    import asyncio
    
    async def main():
-       client = Neo4jGDSAgentClient()
-       await client.connect()
+       client = await create_client()
+       tools = await client.list_tools()
+       result = await client.call_tool("get_node_labels", {})
+       await client.close()  # Don't forget to close!
        
        # List available tools
        tools = await client.list_tools()

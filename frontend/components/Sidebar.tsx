@@ -13,6 +13,7 @@ interface SidebarProps {
   onTesterChange: (username: string | null) => void
   isLoadingTesters: boolean
   testerError?: string | null
+  isTesterSelectionDisabled?: boolean
 }
 
 export default function Sidebar({
@@ -23,6 +24,7 @@ export default function Sidebar({
   onTesterChange,
   isLoadingTesters,
   testerError,
+  isTesterSelectionDisabled = false,
 }: SidebarProps) {
   const [isCollapsed, setIsCollapsed] = useState(false)
 
@@ -89,7 +91,9 @@ export default function Sidebar({
               <select
                 value={selectedTester ?? ''}
                 onChange={(e) => onTesterChange(e.target.value || null)}
-                disabled={isLoadingTesters || testerUsers.length === 0}
+                disabled={
+                  isLoadingTesters || testerUsers.length === 0 || isTesterSelectionDisabled
+                }
                 className="w-full bg-gray-900 text-white border border-gray-600 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60"
               >
                 <option value="" disabled>
