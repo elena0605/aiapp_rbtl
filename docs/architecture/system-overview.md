@@ -27,8 +27,10 @@ flowchart LR
 
 ## Deployment Targets
 
-- **Local Dev**: Docker + Uvicorn + Next.js dev server; Langfuse runs via `docker-compose.langfuse.yml`.
-- **Staging/Prod**: Recommended approach is containerize backend/frontend separately, deploy Neo4j (Aura or self-hosted) plus MongoDB (Atlas). GitHub Actions will build docs and site assets.
+- **Local Dev**: Fully dockerized with `docker-compose.yml` (production mode) or `docker-compose.dev.yml` (hot-reload). Langfuse runs via `docker-compose.langfuse.yml`. Alternative: run services directly (Uvicorn + Next.js dev server) for active debugging.
+- **Staging/Prod**: Docker containers deployed to Azure Container Apps. Backend and frontend are separate containers built from `backend/Dockerfile` and `frontend/Dockerfile`. Neo4j (Aura) and MongoDB (Atlas/Cosmos DB) are managed services. GitHub Actions automates Docker build and deployment.
+
+See [Getting Started](../getting-started.md) for local Docker setup and [Azure Production Deployment](../operations/azure-deployment.md) for cloud deployment.
 
 See the dedicated pages for deep dives into each subsystem.
 

@@ -1,39 +1,54 @@
 # Deployment & Environments
 
-Use this guide when promoting GraphRAG beyond local development.
+This guide covers deploying the dockerized RBTL GraphRAG application across different environments.
 
 ## Environment Matrix
 
 | Target | Backend | Frontend | Neo4j | MongoDB | Langfuse |
 |--------|---------|----------|-------|---------|----------|
-| Local  | Uvicorn + reload | Next.js dev server | Aura/self-hosted | Atlas/local | docker-compose |
-| Staging | Containerized FastAPI | Static export or Next.js server | Managed Aura | Managed Atlas | Self-hosted or Cloud |
-| Prod   | Container/orchestrated | Static assets behind CDN | Aura Enterprise | Atlas/DocumentDB | Langfuse Cloud |
+| **Local** | Docker Container | Docker Container | Aura/self-hosted | Atlas/local | docker-compose |
+| **Staging** | Docker (Azure Container Apps) | Docker (Azure Container Apps) | Managed Aura | Managed Atlas | Self-hosted or Cloud |
+| **Prod** | Docker (Azure Container Apps) | Docker (Azure Container Apps) | Aura Enterprise | Atlas/DocumentDB | Langfuse Cloud |
 
-## Backend Container Stub
+**All environments use Docker containers** for consistency and easy deployment.
 
-```Dockerfile
-FROM python:3.11-slim
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install -r requirements.txt
-COPY backend backend
-COPY ai ai
-CMD ["uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
-```
+## Dockerized Deployment
 
-Pair with environment variables injected by your orchestration platform (Kubernetes, ECS, etc.).
+The application is **fully containerized** using Docker for all environments. This ensures consistency between local development, staging, and production.
 
-## Frontend Build
+### Container Architecture
 
+**Backend Container** (`backend/Dockerfile`):
+- Python 3.13-slim base image
+- All dependencies from `backend/requirements.txt`
+- Exposes port 8000
+- Includes health check support
+- Multi-stage build for optimization
+
+**Frontend Container** (`frontend/Dockerfile`):
+- Node.js 18-alpine base image
+- Multi-stage build for optimization
+- Next.js standalone output mode
+- Exposes port 3000
+- Production-ready static assets
+
+### Local Docker Setup
+
+**Quick Start:**
 ```bash
-cd frontend
-npm ci
-npm run build
-npm run export  # optional static export
+# Production mode (optimized, no hot-reload)
+docker-compose up --build
+
+# Development mode (with hot-reload for active coding)
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 ```
 
-Serve the `.next/standalone` or `out/` directory via your platform of choice (CloudFront, Vercel, etc.). Set `NEXT_PUBLIC_*` env vars for backend URLs and analytics keys.
+**Access:**
+- Frontend: http://localhost:3003
+- Backend: http://localhost:8001
+- API Docs: http://localhost:8001/docs
+
+See [Docker Deployment Guide](../DOCKER_DEPLOYMENT.md) for detailed instructions, troubleshooting, and cloud deployment options.
 
 ## Secrets & Config
 

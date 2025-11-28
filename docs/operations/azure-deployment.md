@@ -1,6 +1,14 @@
 # Azure Production Deployment Plan
 
-This guide outlines the recommended Azure components and deployment steps for RBTL GraphRAG production deployment.
+This guide outlines the recommended Azure components and deployment steps for RBTL GraphRAG production deployment using **Docker containers**.
+
+## Overview
+
+The application is deployed as **two Docker containers** on Azure Container Apps:
+- **Backend**: FastAPI application (from `backend/Dockerfile`)
+- **Frontend**: Next.js application (from `frontend/Dockerfile`)
+
+Both containers are built locally or via CI/CD, pushed to Azure Container Registry (ACR), and deployed to Azure Container Apps for auto-scaling and high availability.
 
 ## Architecture Overview
 
@@ -34,13 +42,13 @@ This guide outlines the recommended Azure components and deployment steps for RB
 
 | Component | Service | Purpose |
 |-----------|---------|---------|
-| **Frontend Hosting** | Azure Static Web Apps | Host Next.js frontend with CDN and auto-scaling |
-| **Backend Hosting** | Azure Container Apps | Run FastAPI backend with auto-scaling |
-| **Container Registry** | Azure Container Registry (ACR) | Store Docker images |
+| **Frontend Hosting** | Azure Container Apps | Run Next.js frontend Docker container with auto-scaling |
+| **Backend Hosting** | Azure Container Apps | Run FastAPI backend Docker container with auto-scaling |
+| **Container Registry** | Azure Container Registry (ACR) | Store and version Docker images |
 | **Secrets Management** | Azure Key Vault | Secure storage for API keys and credentials |
 | **Database** | Azure Cosmos DB (MongoDB API) | Knowledge base storage |
 | **Monitoring** | Azure Application Insights | Application performance and error tracking |
-| **CI/CD** | GitHub Actions | Automated deployment pipeline |
+| **CI/CD** | GitHub Actions | Automated Docker build and deployment pipeline |
 
 ### External Services
 
@@ -96,15 +104,9 @@ az containerapp env create \
   --location westeurope
 ```
 
-#### 1.5 Create Azure Static Web App (Frontend)
+#### 1.5 Frontend Container App
 
-```bash
-az staticwebapp create \
-  --name swa-rbtl-graphrag-prod \
-  --resource-group rg-rbtl-graphrag-prod \
-  --location westeurope \
-  --sku Standard
-```
+The frontend will be deployed as a Container App using the dockerized Next.js image. Both frontend and backend use the same Container Apps platform for consistency.
 
 #### 1.6 Create Azure Cosmos DB (MongoDB API)
 
@@ -181,20 +183,34 @@ az keyvault set-policy \
   --secret-permissions get list
 ```
 
-### Phase 3: Backend Deployment
+### Phase 3: Backend Docker Container Deployment
 
 #### 3.1 Build and Push Docker Image
+
+The backend uses the `backend/Dockerfile` to create a production-ready container:
 
 ```bash
 # Login to ACR
 az acr login --name acrrbtlgraphrag
 
-# Build image
-docker build -t acrrbtlgraphrag.azurecr.io/rbtl-graphrag-backend:latest .
+# Build backend Docker image from backend/Dockerfile
+docker build -f backend/Dockerfile -t acrrbtlgraphrag.azurecr.io/rbtl-graphrag-backend:latest .
 
-# Push to ACR
+# Tag with commit SHA for versioning
+docker tag acrrbtlgraphrag.azurecr.io/rbtl-graphrag-backend:latest \
+  acrrbtlgraphrag.azurecr.io/rbtl-graphrag-backend:$(git rev-parse --short HEAD)
+
+# Push both tags to ACR
 docker push acrrbtlgraphrag.azurecr.io/rbtl-graphrag-backend:latest
+docker push acrrbtlgraphrag.azurecr.io/rbtl-graphrag-backend:$(git rev-parse --short HEAD)
 ```
+
+**What the Dockerfile does:**
+- Uses Python 3.13-slim base image
+- Installs all dependencies from `backend/requirements.txt`
+- Copies application code (backend, ai, utils directories)
+- Exposes port 8000
+- Runs FastAPI with uvicorn
 
 #### 3.2 Create Container App for Backend
 
@@ -239,74 +255,99 @@ BACKEND_URL=$(az containerapp show \
 echo "Backend URL: https://$BACKEND_URL"
 ```
 
-### Phase 4: Frontend Deployment
+### Phase 4: Frontend Docker Container Deployment
 
-#### 4.1 Configure Frontend Environment
+#### 4.1 Build and Push Frontend Docker Image
 
-Create `frontend/.env.production`:
-
-```bash
-NEXT_PUBLIC_API_URL=https://<your-backend-url>
-```
-
-#### 4.2 Build Frontend
+The frontend uses the `frontend/Dockerfile` to create a production-ready Next.js container:
 
 ```bash
-cd frontend
-npm ci
-npm run build
-```
-
-#### 4.3 Deploy to Azure Static Web Apps
-
-**Option A: Using Azure CLI**
-
-```bash
-az staticwebapp deploy \
-  --name swa-rbtl-graphrag-prod \
+# Get backend URL first (from Phase 3.3)
+BACKEND_URL=$(az containerapp show \
+  --name ca-rbtl-graphrag-backend \
   --resource-group rg-rbtl-graphrag-prod \
-  --source-location frontend \
-  --app-location frontend \
-  --output-location .next
+  --query properties.configuration.ingress.fqdn -o tsv)
+
+# Build frontend Docker image from frontend/Dockerfile
+# Pass backend URL as build argument for NEXT_PUBLIC_API_URL
+docker build -f frontend/Dockerfile \
+  --build-arg NEXT_PUBLIC_API_URL=https://$BACKEND_URL \
+  -t acrrbtlgraphrag.azurecr.io/rbtl-graphrag-frontend:latest .
+
+# Tag with commit SHA for versioning
+docker tag acrrbtlgraphrag.azurecr.io/rbtl-graphrag-frontend:latest \
+  acrrbtlgraphrag.azurecr.io/rbtl-graphrag-frontend:$(git rev-parse --short HEAD)
+
+# Push both tags to ACR
+docker push acrrbtlgraphrag.azurecr.io/rbtl-graphrag-frontend:latest
+docker push acrrbtlgraphrag.azurecr.io/rbtl-graphrag-frontend:$(git rev-parse --short HEAD)
 ```
 
-**Option B: Using GitHub Actions (Recommended)**
+**What the Dockerfile does:**
+- Uses Node.js 18-alpine base image
+- Multi-stage build (deps → builder → runner)
+- Builds Next.js with standalone output mode
+- Creates optimized production image
+- Exposes port 3000
 
-1. Connect GitHub repo to Static Web App:
-   ```bash
-   az staticwebapp create \
-     --name swa-rbtl-graphrag-prod \
-     --resource-group rg-rbtl-graphrag-prod \
-     --source https://github.com/bojan2110/rbtl_graphrag \
-     --location westeurope \
-     --branch main \
-     --app-location frontend \
-     --output-location .next \
-     --login-with-github
-   ```
+#### 4.2 Create Container App for Frontend
 
-2. Configure build settings in Azure Portal:
-   - App location: `frontend`
-   - Output location: `.next`
-   - Build command: `npm run build`
+```bash
+az containerapp create \
+  --name ca-rbtl-graphrag-frontend \
+  --resource-group rg-rbtl-graphrag-prod \
+  --environment env-rbtl-graphrag-prod \
+  --image acrrbtlgraphrag.azurecr.io/rbtl-graphrag-frontend:latest \
+  --target-port 3000 \
+  --ingress external \
+  --registry-server acrrbtlgraphrag.azurecr.io \
+  --registry-username $(az acr credential show --name acrrbtlgraphrag --query username -o tsv) \
+  --registry-password $(az acr credential show --name acrrbtlgraphrag --query passwords[0].value -o tsv) \
+  --min-replicas 1 \
+  --max-replicas 3 \
+  --cpu 0.5 \
+  --memory 1.0Gi \
+  --env-vars \
+    NEXT_PUBLIC_API_URL=https://$BACKEND_URL
+```
 
-3. Add environment variables in Azure Portal:
-   - `NEXT_PUBLIC_API_URL`: `https://<your-backend-url>`
+#### 4.3 Get Frontend URL
+
+```bash
+FRONTEND_URL=$(az containerapp show \
+  --name ca-rbtl-graphrag-frontend \
+  --resource-group rg-rbtl-graphrag-prod \
+  --query properties.configuration.ingress.fqdn -o tsv)
+
+echo "Frontend URL: https://$FRONTEND_URL"
+```
 
 ### Phase 5: CI/CD Pipeline Setup
 
-The GitHub Actions workflow (`.github/workflows/azure-deploy.yml`) automates deployment:
+The GitHub Actions workflow (`.github/workflows/azure-deploy.yml`) fully automates the Docker build and deployment process:
 
-- **Backend**: Builds Docker image, pushes to ACR, updates Container App
-- **Frontend**: Builds Next.js app, deploys to Static Web Apps
+**Automated Steps:**
+1. **Backend**: 
+   - Builds Docker image from `backend/Dockerfile`
+   - Pushes to Azure Container Registry (ACR)
+   - Updates Container App with new image
+   
+2. **Frontend**:
+   - Gets backend URL from deployed backend
+   - Builds Docker image from `frontend/Dockerfile` with backend URL
+   - Pushes to ACR
+   - Updates Container App with new image
+
+**Workflow triggers on:**
+- Pushes to `main` branch (changes to backend, frontend, ai, utils, or Dockerfiles)
+- Manual trigger via GitHub Actions UI
 
 #### 5.1 Configure GitHub Secrets
 
 Add these secrets in GitHub repository settings:
 
 - `AZURE_CREDENTIALS`: Service principal credentials (create with `az ad sp create-for-rbac`)
-- `AZURE_STATIC_WEB_APPS_API_TOKEN`: From Azure Portal → Static Web App → Manage deployment token
-- `NEXT_PUBLIC_API_URL`: Your backend Container App URL
+- `NEXT_PUBLIC_API_URL`: Your backend Container App URL (e.g., `https://ca-rbtl-graphrag-backend.xxx.azurecontainerapps.io`)
 
 ### Phase 6: Monitoring & Observability
 
@@ -367,7 +408,16 @@ curl https://$BACKEND_URL/api/graph-info
 
 #### 7.3 Verify Frontend
 
-1. Visit Static Web App URL (from Azure Portal)
+```bash
+FRONTEND_URL=$(az containerapp show \
+  --name ca-rbtl-graphrag-frontend \
+  --resource-group rg-rbtl-graphrag-prod \
+  --query properties.configuration.ingress.fqdn -o tsv)
+
+echo "Frontend URL: https://$FRONTEND_URL"
+```
+
+1. Visit the frontend Container App URL
 2. Test chat interface
 3. Verify API connectivity
 4. Check browser console for errors
@@ -391,7 +441,18 @@ az containerapp revision activate \
 
 ### Frontend Rollback
 
-Revert the last commit in GitHub and push, or manually deploy a previous build from Azure Portal.
+```bash
+# List revisions
+az containerapp revision list \
+  --name ca-rbtl-graphrag-frontend \
+  --resource-group rg-rbtl-graphrag-prod
+
+# Activate previous revision
+az containerapp revision activate \
+  --name ca-rbtl-graphrag-frontend \
+  --resource-group rg-rbtl-graphrag-prod \
+  --revision <previous-revision-name>
+```
 
 ## Security Checklist
 
@@ -421,7 +482,13 @@ az containerapp update \
   --resource-group rg-rbtl-graphrag-prod \
   --image acrrbtlgraphrag.azurecr.io/rbtl-graphrag-backend:latest
 
-# Frontend updates automatically via GitHub Actions
+# Update frontend
+az containerapp update \
+  --name ca-rbtl-graphrag-frontend \
+  --resource-group rg-rbtl-graphrag-prod \
+  --image acrrbtlgraphrag.azurecr.io/rbtl-graphrag-frontend:latest
+
+# Or rebuild and push new images, then update (handled automatically by GitHub Actions)
 ```
 
 ## Troubleshooting

@@ -10,7 +10,9 @@ RBTL (Reading Between the Lines) leverages a custom GraphRAG implementation to d
 
 ## How to Use These Docs
 
-- Start with [Getting Started](getting-started.md) to stand up the stack locally.
+- Start with [Getting Started](getting-started.md) to run the dockerized application locally.
 - Explore the [Architecture](architecture/system-overview.md) section for diagrams and service breakdowns.
-- Consult [Operations](operations/deployment.md) before deploying or running the automated test suites.
+- Review [Docker Deployment](../DOCKER_DEPLOYMENT.md) for local and cloud container deployment.
+- Consult [Operations](operations/deployment.md) for environment-specific deployment guides.
+- See [Azure Production Deployment](operations/azure-deployment.md) for cloud deployment with Docker containers.
 

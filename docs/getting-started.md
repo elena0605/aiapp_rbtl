@@ -69,21 +69,51 @@ Additional scripts (`ai/fewshots/generate_examples.py`, `ai/fewshots/generate_qu
 
 ## 5. Run the App
 
-### Backend (FastAPI)
+### Recommended: Docker (Production-Ready)
+
+The application is fully dockerized. Use Docker for consistent, production-like environments:
 
 ```bash
-uvicorn backend.app.main:app --reload
+# Production mode (optimized build, no hot-reload)
+docker-compose up --build
+
+# Development mode (with hot-reload for active coding)
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 ```
 
-### Frontend (Next.js)
+**Access the application:**
+- Frontend: http://localhost:3003
+- Backend API: http://localhost:8001
+- API Docs: http://localhost:8001/docs
 
+**Benefits:**
+- ✅ Consistent environment across local, staging, and production
+- ✅ No need to manage Python/Node versions locally
+- ✅ Matches cloud deployment exactly
+- ✅ Easy to share with team members
+
+See [Docker Deployment Guide](../DOCKER_DEPLOYMENT.md) for detailed instructions and troubleshooting.
+
+### Alternative: Local Development (For Active Coding)
+
+If you prefer running services directly (useful for debugging):
+
+**Backend (FastAPI):**
+```bash
+source venv/bin/activate
+uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+**Frontend (Next.js):**
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
 
-With both servers running, open http://localhost:3000 to try the conversational interface.
+With both servers running, open http://localhost:3002 to try the conversational interface.
+
+**Note:** Local development uses different ports (8000 for backend, 3002 for frontend) to avoid conflicts with Docker.
 
 ## Next Steps
 
