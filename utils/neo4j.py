@@ -33,13 +33,19 @@ def get_driver() -> Driver:
         max_connection_lifetime = float(os.environ.get("NEO4J_MAX_CONNECTION_LIFETIME", "3600.0"))
         max_connection_pool_size = int(os.environ.get("NEO4J_MAX_CONNECTION_POOL_SIZE", "50"))
         
-        _driver = GraphDatabase.driver(
-            uri,
-            auth=(user, password),
-            connection_timeout=connection_timeout,
-            max_connection_lifetime=max_connection_lifetime,
-            max_connection_pool_size=max_connection_pool_size,
-        )
+        
+        
+        driver_kwargs = {
+            "uri": uri,
+            "auth": (user, password),
+            "connection_timeout": connection_timeout,
+            "max_connection_lifetime": max_connection_lifetime,
+            "max_connection_pool_size": max_connection_pool_size,
+        }
+        
+        
+        
+        _driver = GraphDatabase.driver(**driver_kwargs)
         # Skip verify_connectivity() during initialization to avoid hanging
         # Connection will be tested on first actual query/operation
         # Set NEO4J_VERIFY_ON_INIT=true in environment to enable verification
