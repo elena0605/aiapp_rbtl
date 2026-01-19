@@ -39,15 +39,32 @@ pip install -r requirements.txt
 Create a `.env` file in the project root with the following variables:
 
 ```bash
-# Neo4j Configuration
+# Environment Selection
+ENVIRONMENT=production  # Set to "development" to use _DEV variables (default: production)
+
+# Neo4j Configuration (Production)
 NEO4J_URI=neo4j+s://your-db-id.databases.neo4j.io
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=your-password
 
-# Langfuse Configuration (for self-hosted via Docker)
+# Neo4j Configuration (Development - Optional)
+# When ENVIRONMENT=development, these will be used instead of production values
+# If not set, falls back to production values
+NEO4J_URI_DEV=neo4j://127.0.0.1:7687
+NEO4J_USER_DEV=neo4j
+NEO4J_PASSWORD_DEV=local-password
+
+# Langfuse Configuration (Production)
 LANGFUSE_HOST=http://localhost:3001
 LANGFUSE_PUBLIC_KEY=pk-lf-...
 LANGFUSE_SECRET_KEY=sk-lf-...
+
+# Langfuse Configuration (Development - Optional)
+# When ENVIRONMENT=development, these will be used instead of production values
+# If not set, falls back to production values
+LANGFUSE_HOST_DEV=http://localhost:3001
+LANGFUSE_PUBLIC_KEY_DEV=pk-lf-dev-...
+LANGFUSE_SECRET_KEY_DEV=sk-lf-dev-...
 
 # OpenAI Configuration
 OPENAI_API_KEY=sk-proj-...
@@ -60,9 +77,36 @@ PROMPT_LABEL=production  # Optional, defaults to production
 ENABLE_ANALYTICS_AGENT=false  # Set to true to enable graph analytics tools (leiden, article_rank, bridges, etc.)
                               # Default: false (all questions use text-to-Cypher route)
 
-# MongoDB Configuration (for Knowledge Base)
+# MongoDB Configuration (Production)
 MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/?retryWrites=true&w=majority
 MONGODB_DATABASE=graphrag  # Optional, defaults to graphrag
+
+# MongoDB Configuration (Development - Optional)
+# When ENVIRONMENT=development, these will be used instead of production values
+# If not set, falls back to production values
+MONGODB_URI_DEV=mongodb://localhost:27017
+MONGODB_DATABASE_DEV=social_media  # or MONGODB_DB_DEV=social_media
+```
+
+#### Environment Switching
+
+The application supports switching between **development** and **production** environments using the `ENVIRONMENT` variable:
+
+- **Production (default)**: Set `ENVIRONMENT=production` or omit it. Uses standard variable names (`NEO4J_URI`, `MONGODB_URI`, etc.)
+- **Development**: Set `ENVIRONMENT=development`. Uses `_DEV` suffixed variables (`NEO4J_URI_DEV`, `MONGODB_URI_DEV`, etc.)
+
+**How it works:**
+- When `ENVIRONMENT=development`, the app looks for `_DEV` variables first
+- If `_DEV` variables are not set, it falls back to production variables
+- This allows you to override only the variables you need for local development
+
+**Example:** To use a local Neo4j instance for development while keeping production MongoDB:
+```bash
+ENVIRONMENT=development
+NEO4J_URI_DEV=neo4j://127.0.0.1:7687
+NEO4J_USER_DEV=neo4j
+NEO4J_PASSWORD_DEV=local-password
+# MongoDB will use production MONGODB_URI since MONGODB_URI_DEV is not set
 ```
 
 **To get Langfuse keys (if you are not provided with keys already):**

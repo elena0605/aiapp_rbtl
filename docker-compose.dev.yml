@@ -21,7 +21,7 @@ services:
       # Mount source code for hot-reload
       - ./frontend:/app
       - /app/node_modules
-      - /app/.next
+      - /app/.next  
     environment:
       - NODE_ENV=development
     ports:

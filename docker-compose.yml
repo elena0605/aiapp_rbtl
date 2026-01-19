@@ -9,22 +9,38 @@ services:
     ports:
       - "8001:8000"  # Map host 8001 to container 8000 to avoid conflict with local
     environment:
-      # Neo4j
+      # Environment selection (development or production)
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      # Neo4j (production)
       - NEO4J_URI=${NEO4J_URI}
       - NEO4J_USER=${NEO4J_USER}
       - NEO4J_PASSWORD=${NEO4J_PASSWORD}
       - NEO4J_DATABASE=${NEO4J_DATABASE:-}
+      # Neo4j (development - optional, falls back to production if not set)
+      - NEO4J_URI_DEV=${NEO4J_URI_DEV:-}
+      - NEO4J_USER_DEV=${NEO4J_USER_DEV:-}
+      - NEO4J_PASSWORD_DEV=${NEO4J_PASSWORD_DEV:-}
+      - NEO4J_DATABASE_DEV=${NEO4J_DATABASE_DEV:-}
       # OpenAI
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o}
-      # Langfuse
+      # Langfuse (production)
       - LANGFUSE_HOST=${LANGFUSE_HOST}
       - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY}
       - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY}
+      # Langfuse (development - optional, falls back to production if not set)
+      - LANGFUSE_HOST_DEV=${LANGFUSE_HOST_DEV:-}
+      - LANGFUSE_PUBLIC_KEY_DEV=${LANGFUSE_PUBLIC_KEY_DEV:-}
+      - LANGFUSE_SECRET_KEY_DEV=${LANGFUSE_SECRET_KEY_DEV:-}
       - PROMPT_LABEL=${PROMPT_LABEL:-production}
-      # MongoDB
+      # MongoDB (production)
       - MONGODB_URI=${MONGODB_URI}
       - MONGODB_DATABASE=${MONGODB_DATABASE:-graphrag}
+      - MONGODB_DB=${MONGODB_DB:-}
+      # MongoDB (development - optional, falls back to production if not set)
+      - MONGODB_URI_DEV=${MONGODB_URI_DEV:-}
+      - MONGODB_DATABASE_DEV=${MONGODB_DATABASE_DEV:-}
+      - MONGODB_DB_DEV=${MONGODB_DB_DEV:-}
       # Analytics Agent
       - ENABLE_ANALYTICS_AGENT=${ENABLE_ANALYTICS_AGENT:-false}
     env_file:

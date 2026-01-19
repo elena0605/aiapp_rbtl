@@ -17,16 +17,30 @@ def get_driver() -> Driver:
       - NEO4J_URI (e.g., neo4j+s://<db-id>.databases.neo4j.io)
       - NEO4J_USER
       - NEO4J_PASSWORD
+    
+    For environment switching:
+      - Set ENVIRONMENT=development to use NEO4J_URI_DEV, NEO4J_USER_DEV, NEO4J_PASSWORD_DEV
+      - Set ENVIRONMENT=production (or omit) to use NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
     """
     global _driver
     if _driver is None:
         load_dotenv()
-        uri = os.environ.get("NEO4J_URI")
-        user = os.environ.get("NEO4J_USER")
-        password = os.environ.get("NEO4J_PASSWORD")
+        environment = os.environ.get("ENVIRONMENT", "production").lower()
+        
+        # Select environment-specific variables
+        if environment == "development":
+            uri = os.environ.get("NEO4J_URI_DEV") or os.environ.get("NEO4J_URI")
+            user = os.environ.get("NEO4J_USER_DEV") or os.environ.get("NEO4J_USER")
+            password = os.environ.get("NEO4J_PASSWORD_DEV") or os.environ.get("NEO4J_PASSWORD")
+        else:
+            uri = os.environ.get("NEO4J_URI")
+            user = os.environ.get("NEO4J_USER")
+            password = os.environ.get("NEO4J_PASSWORD")
+        
         if not uri or not user or not password:
             raise RuntimeError(
-                "NEO4J_URI/NEO4J_USER/NEO4J_PASSWORD must be set in environment or .env"
+                f"NEO4J_URI/NEO4J_USER/NEO4J_PASSWORD must be set in environment or .env "
+                f"(environment={environment})"
             )
         # Configure timeouts from environment or use defaults
         connection_timeout = float(os.environ.get("NEO4J_CONNECTION_TIMEOUT", "30.0"))
@@ -69,10 +83,37 @@ def get_driver() -> Driver:
     return _driver
 
 
+def get_default_database() -> Optional[str]:
+    """Get the default Neo4j database name based on the current environment.
+    
+    Returns:
+        Database name from NEO4J_DATABASE_DEV (development) or NEO4J_DATABASE (production),
+        or None if not set (uses Neo4j default).
+    """
+    load_dotenv()
+    environment = os.environ.get("ENVIRONMENT", "production").lower()
+    
+    if environment == "development":
+        database = os.environ.get("NEO4J_DATABASE_DEV") or os.environ.get("NEO4J_DATABASE")
+    else:
+        database = os.environ.get("NEO4J_DATABASE")
+    
+    return database if database else None
+
+
 @contextmanager
 def get_session(database: Optional[str] = None) -> Iterator[Session]:
-    """Yield a Neo4j session bound to the optional database and close it on exit."""
+    """Yield a Neo4j session bound to the optional database and close it on exit.
+    
+    If database is not provided, uses the default database from environment variables:
+    - NEO4J_DATABASE_DEV (when ENVIRONMENT=development)
+    - NEO4J_DATABASE (when ENVIRONMENT=production)
+    - None (uses Neo4j default database) if neither is set
+    """
     driver = get_driver()
+    # Use provided database, or fall back to environment-based default
+    if database is None:
+        database = get_default_database()
     kwargs = {"database": database} if database else {}
     session = driver.session(**kwargs)
     try:

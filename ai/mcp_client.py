@@ -129,13 +129,33 @@ async def create_client(
     project_root = Path(__file__).parent.parent
     load_dotenv(project_root / ".env")
     
-    # Get credentials from args or environment
-    neo4j_uri = neo4j_uri or os.environ.get("NEO4J_URI")
-    neo4j_user = neo4j_user or os.environ.get("NEO4J_USER") or os.environ.get("NEO4J_USERNAME", "neo4j")
-    neo4j_password = neo4j_password or os.environ.get("NEO4J_PASSWORD")
+    # Get environment for environment-specific credentials
+    environment = os.environ.get("ENVIRONMENT", "production").lower()
+    
+    # Get credentials from args or environment (with environment switching support)
+    if not neo4j_uri:
+        if environment == "development":
+            neo4j_uri = os.environ.get("NEO4J_URI_DEV") or os.environ.get("NEO4J_URI")
+        else:
+            neo4j_uri = os.environ.get("NEO4J_URI")
+    
+    if not neo4j_user:
+        if environment == "development":
+            neo4j_user = os.environ.get("NEO4J_USER_DEV") or os.environ.get("NEO4J_USER") or os.environ.get("NEO4J_USERNAME", "neo4j")
+        else:
+            neo4j_user = os.environ.get("NEO4J_USER") or os.environ.get("NEO4J_USERNAME", "neo4j")
+    
+    if not neo4j_password:
+        if environment == "development":
+            neo4j_password = os.environ.get("NEO4J_PASSWORD_DEV") or os.environ.get("NEO4J_PASSWORD")
+        else:
+            neo4j_password = os.environ.get("NEO4J_PASSWORD")
     
     if not neo4j_uri or not neo4j_password:
-        raise ValueError("NEO4J_URI and NEO4J_PASSWORD must be set in .env file or passed as arguments")
+        raise ValueError(
+            f"NEO4J_URI and NEO4J_PASSWORD must be set in .env file or passed as arguments "
+            f"(environment={environment})"
+        )
     
     # Find gds-agent executable
     venv_bin = project_root / "venv" / "bin"

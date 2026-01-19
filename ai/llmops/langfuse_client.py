@@ -29,6 +29,10 @@ except Exception:
 def _init_langfuse_client() -> Any:
     """Initialize Langfuse client with credentials from .env.
     
+    For environment switching:
+      - Set ENVIRONMENT=development to use LANGFUSE_HOST_DEV, LANGFUSE_PUBLIC_KEY_DEV, LANGFUSE_SECRET_KEY_DEV
+      - Set ENVIRONMENT=production (or omit) to use LANGFUSE_HOST, LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY
+    
     Returns:
         Initialized Langfuse client
     """
@@ -40,15 +44,24 @@ def _init_langfuse_client() -> Any:
         project_root = Path(__file__).resolve().parents[2]  # Go up to project root
         load_dotenv(dotenv_path=str(project_root / ".env"))
     
-    # Get credentials
-    host = os.environ.get("LANGFUSE_HOST")
-    public_key = os.environ.get("LANGFUSE_PUBLIC_KEY")
-    secret_key = os.environ.get("LANGFUSE_SECRET_KEY")
+    # Get environment
+    environment = os.environ.get("ENVIRONMENT", "production").lower()
+    
+    # Select environment-specific credentials
+    if environment == "development":
+        host = os.environ.get("LANGFUSE_HOST_DEV") or os.environ.get("LANGFUSE_HOST")
+        public_key = os.environ.get("LANGFUSE_PUBLIC_KEY_DEV") or os.environ.get("LANGFUSE_PUBLIC_KEY")
+        secret_key = os.environ.get("LANGFUSE_SECRET_KEY_DEV") or os.environ.get("LANGFUSE_SECRET_KEY")
+    else:
+        host = os.environ.get("LANGFUSE_HOST")
+        public_key = os.environ.get("LANGFUSE_PUBLIC_KEY")
+        secret_key = os.environ.get("LANGFUSE_SECRET_KEY")
     
     if not all([host, public_key, secret_key]):
         raise RuntimeError(
-            "Langfuse credentials not found. Set LANGFUSE_HOST, LANGFUSE_PUBLIC_KEY, "
-            "and LANGFUSE_SECRET_KEY in .env or environment variables."
+            f"Langfuse credentials not found (environment={environment}). "
+            f"Set LANGFUSE_HOST, LANGFUSE_PUBLIC_KEY, and LANGFUSE_SECRET_KEY "
+            f"(or _DEV variants for development) in .env or environment variables."
         )
     
     # Initialize client explicitly
@@ -86,9 +99,16 @@ def create_completion(
         response_format: Optional response format (e.g., {"type": "json_object"} or JSON schema)
     """
     # Try Langfuse OpenAI wrapper first if keys are provided
-    langfuse_host = os.environ.get("LANGFUSE_HOST")
-    langfuse_public_key = os.environ.get("LANGFUSE_PUBLIC_KEY")
-    langfuse_secret_key = os.environ.get("LANGFUSE_SECRET_KEY")
+    # Get environment-specific credentials
+    environment = os.environ.get("ENVIRONMENT", "production").lower()
+    if environment == "development":
+        langfuse_host = os.environ.get("LANGFUSE_HOST_DEV") or os.environ.get("LANGFUSE_HOST")
+        langfuse_public_key = os.environ.get("LANGFUSE_PUBLIC_KEY_DEV") or os.environ.get("LANGFUSE_PUBLIC_KEY")
+        langfuse_secret_key = os.environ.get("LANGFUSE_SECRET_KEY_DEV") or os.environ.get("LANGFUSE_SECRET_KEY")
+    else:
+        langfuse_host = os.environ.get("LANGFUSE_HOST")
+        langfuse_public_key = os.environ.get("LANGFUSE_PUBLIC_KEY")
+        langfuse_secret_key = os.environ.get("LANGFUSE_SECRET_KEY")
     
     use_langfuse = bool(langfuse_host and langfuse_public_key and langfuse_secret_key)
 

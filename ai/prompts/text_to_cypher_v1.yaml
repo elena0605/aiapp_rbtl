@@ -35,6 +35,8 @@ template: |
   construct a Cypher statement.
   Do not include any text except the generated Cypher statement.
   ONLY RESPOND WITH CYPHER, NO CODEBLOCKS.
+  
+  Important: All Neo4j temporal properties (DateTime, LocalDateTime, Date, Time, Duration) must be converted to strings using toString() before returning them. For example: RETURN toString(tc.create_time) AS create_time
 
   User question: {{ question }}
 

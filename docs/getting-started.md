@@ -25,16 +25,75 @@ pip install -r requirements.txt
 Create `.env` in the project root. Use the template below and adjust credentials as needed:
 
 ```bash
+# Environment Selection
+ENVIRONMENT=production  # Set to "development" for local development
+
+# Neo4j (Production)
 NEO4J_URI=neo4j+s://your-db.databases.neo4j.io
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=***
-OPENAI_API_KEY=sk-***
+
+# Neo4j (Development - Optional)
+# Uncomment and set when ENVIRONMENT=development
+# NEO4J_URI_DEV=neo4j://127.0.0.1:7687
+# NEO4J_USER_DEV=neo4j
+# NEO4J_PASSWORD_DEV=local-password
+
+# Langfuse (Production)
 LANGFUSE_HOST=http://localhost:3001
 LANGFUSE_PUBLIC_KEY=pk-***
 LANGFUSE_SECRET_KEY=sk-***
+
+# Langfuse (Development - Optional)
+# Uncomment and set when ENVIRONMENT=development
+# LANGFUSE_HOST_DEV=http://localhost:3001
+# LANGFUSE_PUBLIC_KEY_DEV=pk-dev-***
+# LANGFUSE_SECRET_KEY_DEV=sk-dev-***
+
+# MongoDB (Production)
 MONGODB_URI=mongodb+srv://...
+MONGODB_DATABASE=graphrag
+
+# MongoDB (Development - Optional)
+# Uncomment and set when ENVIRONMENT=development
+# MONGODB_URI_DEV=mongodb://localhost:27017
+# MONGODB_DATABASE_DEV=social_media
+
+# OpenAI
+OPENAI_API_KEY=sk-***
+OPENAI_MODEL=gpt-4o
+
+# Optional
 ENABLE_ANALYTICS_AGENT=false
+PROMPT_LABEL=production
 ```
+
+### Environment Switching
+
+The application supports switching between **development** and **production** environments:
+
+- **Production (default)**: Uses standard variables (`NEO4J_URI`, `MONGODB_URI`, `LANGFUSE_HOST`, etc.)
+- **Development**: Set `ENVIRONMENT=development` to use `_DEV` suffixed variables
+
+**Benefits:**
+- Use local databases (Neo4j, MongoDB) for development
+- Use local Langfuse instance for development
+- Keep production credentials separate
+- Fallback to production if `_DEV` variables are not set
+
+**Example for local development:**
+```bash
+ENVIRONMENT=development
+NEO4J_URI_DEV=neo4j://127.0.0.1:7687
+MONGODB_URI_DEV=mongodb://localhost:27017
+MONGODB_DATABASE_DEV=social_media
+LANGFUSE_HOST_DEV=http://localhost:3001
+# Production variables remain for reference but won't be used
+```
+
+**Switching Environments with Docker:**
+
+When using Docker, you need to recreate containers after changing the `ENVIRONMENT` variable. See the [Docker Deployment Guide](DOCKER_DEPLOYMENT.md#switching-between-environments) for detailed step-by-step instructions on how to switch between environments and update Docker containers.
 
 See `README.md` for the full list of optional knobs (`OUTPUT_MODE`, `DEBUG_PROMPT`, etc.).
 

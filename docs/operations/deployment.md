@@ -56,6 +56,20 @@ See [Docker Deployment Guide](../DOCKER_DEPLOYMENT.md) for detailed instructions
 - Rotate OpenAI/Langfuse keys regularly; the backend reads them on startup.
 - When running analytics agent, ensure both the backend and the MCP server agree on Neo4j credentials.
 
+### Environment Switching
+
+The application supports switching between development and production environments using the `ENVIRONMENT` variable:
+
+- **Production**: Set `ENVIRONMENT=production` (or omit it). Uses standard variables (`NEO4J_URI`, `MONGODB_URI`, etc.)
+- **Development**: Set `ENVIRONMENT=development`. Uses `_DEV` suffixed variables (`NEO4J_URI_DEV`, `MONGODB_URI_DEV`, etc.)
+
+This allows you to:
+- Use local databases for development while keeping production credentials
+- Switch environments without changing code
+- Fallback to production values if `_DEV` variables are not set
+
+See [Docker Deployment Guide](../DOCKER_DEPLOYMENT.md#environment-switching) for detailed configuration examples.
+
 ## Observability & Health Checks
 
 - `GET /health` for FastAPI readiness.

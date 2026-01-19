@@ -56,6 +56,35 @@ else:
 _PROMPT_VAR_PATTERN = re.compile(r"{{\s*(\w+)\s*}}")
 
 
+def _convert_neo4j_temporal_to_string(obj: Any) -> Any:
+    """Recursively convert Neo4j temporal types (DateTime, Date, Time, Duration) to strings.
+    
+    This ensures JSON serialization works correctly for Neo4j query results.
+    Even if the prompt instructs to use toString() in Cypher, this provides a safety net
+    for any DateTime objects that might still be returned.
+    """
+    try:
+        # Check if it's a Neo4j temporal type
+        from neo4j.time import DateTime, Date, Time, Duration
+        
+        if isinstance(obj, (DateTime, Date, Time, Duration)):
+            return str(obj)
+    except ImportError:
+        # Neo4j types not available, skip conversion
+        pass
+    
+    # Handle dictionaries
+    if isinstance(obj, dict):
+        return {key: _convert_neo4j_temporal_to_string(value) for key, value in obj.items()}
+    
+    # Handle lists
+    if isinstance(obj, list):
+        return [_convert_neo4j_temporal_to_string(item) for item in obj]
+    
+    # Return as-is for other types
+    return obj
+
+
 class _LocalPrompt:
     """Minimal prompt wrapper to mimic Langfuse prompt objects."""
 
@@ -209,12 +238,14 @@ class GraphRAGService:
                     logger.info(f"GraphRAG: Analytics agent succeeded with tool: {analytics_result.tool_name}")
                     
                     # Analytics succeeded - return analytics result
+                    # Convert Neo4j temporal types in analytics results
+                    converted_results = _convert_neo4j_temporal_to_string(analytics_result.raw_result)
                     return {
                         "question": question,
                         "route_type": "analytics",  # Indicate this used analytics
                         "tool_name": analytics_result.tool_name,
                         "tool_inputs": analytics_result.inputs,
-                        "results": analytics_result.raw_result,
+                        "results": converted_results,
                         "summary": analytics_result.summary,
                         "examples_used": None,
                         "cypher": None,  # No Cypher for analytics
@@ -398,6 +429,8 @@ class GraphRAGService:
                     query_start = time.perf_counter()
                     query_result = session.run(cypher)
                     rows = [record.data() for record in query_result]
+                    # Convert Neo4j temporal types to strings for JSON serialization
+                    rows = [_convert_neo4j_temporal_to_string(row) for row in rows]
                     timings["query_knowledge_base"] = time.perf_counter() - query_start
                     logger.info(
                         "GraphRAG: Cypher execution completed in %.2fs (%s rows)",

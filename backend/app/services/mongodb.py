@@ -17,12 +17,27 @@ _db = None
 
 
 def get_mongo_client() -> MongoClient:
-    """Get or create MongoDB client."""
+    """Get or create MongoDB client.
+    
+    For environment switching:
+      - Set ENVIRONMENT=development to use MONGODB_URI_DEV
+      - Set ENVIRONMENT=production (or omit) to use MONGODB_URI
+    """
     global _client
     if _client is None:
-        connection_string = os.getenv("MONGODB_URI")
+        environment = os.getenv("ENVIRONMENT", "production").lower()
+        
+        # Select environment-specific connection string
+        if environment == "development":
+            connection_string = os.getenv("MONGODB_URI_DEV") or os.getenv("MONGODB_URI")
+        else:
+            connection_string = os.getenv("MONGODB_URI")
+        
         if not connection_string:
-            raise ValueError("MONGODB_URI environment variable is not set")
+            raise ValueError(
+                f"MONGODB_URI environment variable is not set "
+                f"(environment={environment})"
+            )
         # For Azure CosmosDB, we may need to disable SSL certificate verification
         # Note: This is safe for Azure CosmosDB as it uses Microsoft-managed certificates
         _client = MongoClient(
@@ -33,12 +48,30 @@ def get_mongo_client() -> MongoClient:
 
 
 def get_database():
-    """Get MongoDB database instance."""
+    """Get MongoDB database instance.
+    
+    For environment switching:
+      - Set ENVIRONMENT=development to use MONGODB_DB_DEV or MONGODB_DATABASE_DEV
+      - Set ENVIRONMENT=production (or omit) to use MONGODB_DB or MONGODB_DATABASE
+    """
     global _db
     if _db is None:
         client = get_mongo_client()
-        # Support both MONGODB_DB and MONGODB_DATABASE for compatibility
-        db_name = os.getenv("MONGODB_DB") or os.getenv("MONGODB_DATABASE", "graphrag")
+        environment = os.getenv("ENVIRONMENT", "production").lower()
+        
+        # Select environment-specific database name
+        if environment == "development":
+            # Support both MONGODB_DB_DEV and MONGODB_DATABASE_DEV for compatibility
+            db_name = (
+                os.getenv("MONGODB_DB_DEV") 
+                or os.getenv("MONGODB_DATABASE_DEV")
+                or os.getenv("MONGODB_DB")
+                or os.getenv("MONGODB_DATABASE", "graphrag")
+            )
+        else:
+            # Support both MONGODB_DB and MONGODB_DATABASE for compatibility
+            db_name = os.getenv("MONGODB_DB") or os.getenv("MONGODB_DATABASE", "graphrag")
+        
         _db = client[db_name]
     return _db
 
