@@ -1,8 +1,8 @@
 site_name: RBTL GraphRAG
 site_description: Documentation for RBTL (Reading Between the Lines) GraphRAG implementation.
-site_url: https://bojan2110.github.io/rbtl_graphrag/
-repo_url: https://github.com/bojan2110/rbtl_graphrag
-repo_name: bojan2110/rbtl_graphrag
+site_url: https://elena0605.github.io/aiapp_rbtl/
+repo_url: https://github.com/elena0605/aiapp_rbtl
+repo_name: elena0605/aiapp_rbtl
 use_directory_urls: true
 theme:
   name: material
@@ -18,7 +18,7 @@ extra:
     provider: mike
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/bojan2110/rbtl_graphrag
+      link: https://github.com/elena0605/aiapp_rbtl
 plugins:
   - search
   - mermaid2
