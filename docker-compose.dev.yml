@@ -20,12 +20,10 @@ services:
     volumes:
       # Mount source code for hot-reload
       - ./frontend:/app
-      - /app/node_modules
-      - /app/.next  
     environment:
       - NODE_ENV=development
     ports:
-      - "3003:3000"  # Map host 3003 to container 3000 (Next.js dev server default)
+      - "3005:3002"  # Map host 3003 to container 3002 (Next.js dev server runs on 3002)
     # Override to use dev server instead of production build
-    command: sh -c "npm install && npm run dev"
+    command: sh -c "[ -d node_modules ] || npm install && npm run dev"
 

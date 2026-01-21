@@ -61,7 +61,7 @@ services:
         - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8001}  # Backend on 8001
     container_name: rbtl-graphrag-frontend
     ports:
-      - "3003:3000"  # Map host 3003 to container 3000 (3001 used by Langfuse, 3002 by local dev)
+      - "3003:3000"  # Map host 3003 to container 3000 (Next.js production server default)
     depends_on:
       - backend
     environment:

@@ -69,7 +69,7 @@ ENVIRONMENT=production  # Set to "development" for local development
 NEO4J_URI=bolt+s://your-db-id.databases.neo4j.io
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=your-password
-NEO4J_DATABASE=rbl
+NEO4J_DATABASE=neo4j
 
 # Neo4j (Development - Optional)
 # When ENVIRONMENT=development, these will be used instead
@@ -173,10 +173,10 @@ docker-compose restart backend
 
 ```bash
 # For production mode
-docker-compose up -d --force-recreate backend
+docker-compose up -d --force-recreate backend frontend
 
 # For development mode
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate backend
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate backend frontend
 ```
 
 **Note:** You don't need to stop containers first. The `--force-recreate` flag will recreate the container with the new environment variables.
@@ -216,7 +216,7 @@ docker-compose exec backend env | grep ENVIRONMENT
 docker-compose restart backend
 
 # Or with force recreate (ensures env vars are reloaded):
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate backend
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate backend frontend
 
 # Switch to Production
 # 1. Edit .env: ENVIRONMENT=production
@@ -260,7 +260,7 @@ docker-compose up -d --force-recreate
 
 ```bash
 # Command 2: Development Docker mode
-docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate backend frontend
 ```
 - Uses both `docker-compose.yml` + `docker-compose.dev.yml` (dev overrides)
 - Code is **mounted as volumes** (live code from your filesystem)
@@ -437,7 +437,7 @@ ENVIRONMENT=production  # or omit this line
 NEO4J_URI=bolt+s://prod-db.databases.neo4j.io
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=your-password
-NEO4J_DATABASE=rbl
+NEO4J_DATABASE=neo4j
 MONGODB_URI=mongodb+srv://prod-cluster...
 MONGODB_DB=rbl
 # ... production variables
