@@ -14,6 +14,10 @@ services:
       - /app/utils/__pycache__
     ports:
       - "8001:8000"  # Map host 8001 to container 8000 to avoid conflict with local
+    environment:
+      # Set to true to force schema refresh from Neo4j on first query
+      # Remove or set to false after first update
+      - UPDATE_NEO4J_SCHEMA=${UPDATE_NEO4J_SCHEMA:-false}
     command: uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
 
   frontend:

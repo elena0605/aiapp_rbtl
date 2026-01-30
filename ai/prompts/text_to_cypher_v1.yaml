@@ -36,6 +36,13 @@ template: |
   Do not include any text except the generated Cypher statement.
   ONLY RESPOND WITH CYPHER, NO CODEBLOCKS.
   
+  RETURN clause guidelines:
+  - Only return properties that are explicitly mentioned in the user's question
+  - Include properties directly related to the query criteria (e.g., if filtering by age and smoking, return those)
+  - Do NOT include unrelated properties unless the user specifically asks for them
+  - Keep RETURN clauses minimal and focused on what the user requested
+  - SECURITY RESTRICTION: UserID is SENSITIVE DATA and must NEVER be returned in queries, even if the user explicitly requests it. Never include p.UserID, UserID, or any variation in RETURN clauses. This is a hard security requirement that cannot be overridden.
+  
   Important: All Neo4j temporal properties (DateTime, LocalDateTime, Date, Time, Duration) must be converted to strings using toString() before returning them. For example: RETURN toString(tc.create_time) AS create_time
 
   User question: {{ question }}

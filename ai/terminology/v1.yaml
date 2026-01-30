@@ -1,10 +1,10 @@
 nodes:
-  Person: "This node represents the young people or participants in our study, basically the people whose behavior and preferences we are analyzing. When someone says ‘youth’, ‘participants’, or ‘people’, they should think of this node. This node NEVER REPRESENTS AN INFLUENCER."
+  Person: "This node represents the young people or participants in our study, basically the people whose behavior and preferences we are analyzing. When someone says 'youth', 'participants', or 'people', they should think of this node. This node NEVER REPRESENTS AN INFLUENCER."
   Influencer: "Influencers are individuals who create content online. In our graph model, influencers can be either on Tiktok (TikTokUser) or YouTube (YouTubeChannel) social media platforms. Our participants name these influencers as those they follow on social media platforms. So, an Influencer node captures these popular figures the participants (Person node) care about."
   Area: "The Area node represents a specific geographic neighborhood or district where a participant lives. Currently, in our graph schema only areas within Rotterdam Municipality are supported. Never generate a cypher query when area that doesn't belong to Rotterdam municipality is requested. For instance, Charlois or Feijenoord would be valid Area nodes. Area nodes help us group people by where they reside, and derive area-based differences in behaviours."
   Municipality: "This is a larger administrative region that includes many Areas. For example, Rotterdam itself is a Municipality containing various Areas. We only support municipalities coming from the Rotterdam Rijmond Region. Never generate a cypher query when municipality that doesn't belong to Rotterdam Rijmond region is requested. "
-  TikTokUser: "This node stands for a TikTok account that belongs to an Influencer. It’s the representation of the influencer's presence on the TikTok platform."
-  YouTubeChannel: "Similar to TiktokUser, this node represents an Influencer’s YouTube channel, reflecting their presence on YouTube."
+  TikTokUser: "This node stands for a TikTok account that belongs to an Influencer. It's the representation of the influencer's presence on the TikTok platform."
+  YouTubeChannel: "Similar to TiktokUser, this node represents an Influencer's YouTube channel, reflecting their presence on YouTube."
   TikTokVideo: "Tiktok Videos are the pieces of content published by TikTok influencers. These nodes capture details related to video content published by the TikTok influencer."
   YouTubeVideo: "YouTube Videos are the pieces of content published by Youtube influencers (YouTubeChannel). These nodes capture details related to video content published by the YouTube influencer."
   TikTokComment: "TikTok Comments are user interactions on TikTok videos. They can be from followers or viewers engaging with the content, or the influencers themselves. Sometimes comments have replies, which are also captured as nodes."
@@ -12,7 +12,7 @@ nodes:
   TikTokHashTag: "On TikTok, hashtags capture the keywords used on TikTok videos. TikTokHashTag nodes help categorize and spread content within the platform."
   TikTokSticker: "On TikTok, stickers are graphic elements added to TikTok videos. The TikTokSticker node represents these decorations and nuances in video content."
   YoutubeVideoTag: "Tags on YouTube videos work like keywords, and the Tag node captures these to help categorize YouTubeVideo by topic or theme."
-  YoutubeVideoTopic: "Topic nodes on youtube videos represent the subject matter or themes of videos, like ‘news’, ‘sports’, or ‘entertainment’. This helps us analyze what kinds of content participants are being exposed to."
+  YoutubeVideoTopic: "Topic nodes on youtube videos represent the subject matter or themes of videos, like 'news', 'sports', or 'entertainment'. This helps us analyze what kinds of content participants are being exposed to."
 relationships:
   LIVES_IN_AREA: "This relationship connects a Person node to the Area node where they live. It tells us the geographic context (on area level) of each participant. Area is part of a municipality. The only area-level data we have is from Rotterdam's municipality areas."
   LIVES_IN_MUNICIPALITY: "This relationship connects a Person node to the Municipality node where they live. It tells us the geographic context (on municipality level) of each participant. We only support municipalities from Rotterdam Rijmond Region."
@@ -24,3 +24,302 @@ relationships:
   HAS_COMMENT: "Links a TikTokVideo or YouTubeVideo to comments made by viewers or followers (TikTokComment or YouTubeComment), capturing audience engagement."
   HAS_TOPIC: "This connects a YouTube video to its Topic, specifying what the content is about. This helps us analyze trends in exposure and content types participants consume."
   FOLLOWS: "This relationship shows that a Person follows an Influencer on a social media platform. It tells us which influencers each participant is interested in."
+properties:
+  Person:
+    _note: "IMPORTANT: Most Person properties are STRING types and require exact string matching (p.property = 'exact value'). Do NOT use numeric conversions, CONTAINS, or partial matching. Exceptions: gender and school_year are numeric (Long) - use numeric comparisons for these. For all other properties, match the exact string values listed below. RETURN CLAUSE: Only return properties that are explicitly mentioned in the user's question or directly related to the query criteria. Do NOT include unrelated properties like feels_happy, has_mental_health_issues unless the user specifically asks for them. SECURITY: UserID is SENSITIVE DATA and must NEVER be returned in queries, even if explicitly requested by the user. Never include p.UserID or UserID in RETURN clauses."
+    gender:
+      description: "Gender in two categories - IMPORTANT: When returning gender in Cypher queries, ALWAYS use a CASE statement to map numeric codes to labels: CASE WHEN p.gender = 1 THEN 'Boy' WHEN p.gender = 2 THEN 'Girl' WHEN p.gender = 9 THEN 'Unknown' ELSE 'Unknown' END AS gender. Never return the raw numeric value (1, 2, 9) - always map to the human-readable label."
+      values:
+        - value: 1
+          meaning: "Boy"
+        - value: 2
+          meaning: "Girl"
+        - value: 9
+          meaning: "Unknown"
+    school_year:
+      description: "In which grade/year are you? NOTE: This is a numeric (Long) property, use numeric comparison like p.school_year = 4. The value 'Unknown' may be stored as NULL."
+      values:
+        - 1
+        - 2
+        - 3
+        - 4
+        - 5
+        - 6
+        - "Unknown"
+    education_type4:
+      description: "Type of education"
+      values:
+        - "Vmbo-bk"
+        - "Vmbo-gt"
+        - "Havo"
+        - "Vwo"
+        - "Other education"
+        - "Unknown"
+    age:
+      description: "Age in years - IMPORTANT: This is a STRING property, not numeric. You MUST match the exact string value. Do NOT convert to integer or extract numbers. Use exact string equality like p.age = '16 years old', NOT toInteger(p.age) = 16"
+      values:
+        - "12 years old or younger"
+        - "13 years old"
+        - "14 years old"
+        - "15 years old"
+        - "16 years old"
+        - "17 years old or older"
+        - "Unknown"
+    feels_happy:
+      description: "Usually feels (very) happy"
+      values:
+        - "No, feels (very) unhappy or neutral (score 1, 2, or 3)"
+        - "Yes (score 4 or 5)"
+        - "Unknown"
+    has_mental_health_issues:
+      description: "Has mental health issues"
+      values:
+        - "No"
+        - "Yes"
+        - "Unknown"
+    recovers_quickly:
+      description: "Recovers quickly after a difficult period"
+      values:
+        - "No / Neutral"
+        - "Yes"
+        - "Unknown"
+    handles_stress_well:
+      description: "Does not find it difficult to withstand stressful events"
+      values:
+        - "No, finds it difficult / neutral"
+        - "Yes, does not find it difficult"
+        - "Unknown"
+    future_confidence_categories:
+      description: "Confidence in the future"
+      values:
+        - "Little to no trust in their own future (score 5 or lower)"
+        - "Moderate/fair trust in their own future (score 6 or 7)"
+        - "(Very) high trust in their own future (score 8 or higher)"
+        - "Unknown"
+    often_lonely:
+      description: "Often to always lonely in the last 4 weeks"
+      values:
+        - "(Almost) never / Sometimes"
+        - "Often / (Almost) always"
+        - "Unknown"
+    sports_club:
+      description: "How often do you participate in sports at a club or gym?"
+      values:
+        - "(Almost) never"
+        - "Less than 1 day per week"
+        - "1 day per week"
+        - "2 or 3 days per week"
+        - "4 to 6 days per week"
+        - "Every day"
+        - "Unknown"
+    sports_leisure:
+      description: "How often do you exercise or play sports in your free time without a club or gym?"
+      values:
+        - "(Almost) never"
+        - "Less than 1 day per week"
+        - "1 day per week"
+        - "2 or 3 days per week"
+        - "4 to 6 days per week"
+        - "Every day"
+        - "Unknown"
+    drunk_lifetime:
+      description: "How often drunk/tipsy in entire life?"
+      values:
+        - "Never Drunk"
+        - "1 time"
+        - "2 times"
+        - "3 times"
+        - "4 to 10 times"
+        - "11 times or more"
+        - "Drunk"
+        - "Not applicable"
+        - "Unknown"
+    breakfast_days:
+      description: "How many days per week do you have breakfast?"
+      values:
+        - "(Almost) never"
+        - "Not Every Day"
+        - "1 day per week"
+        - "2 days per week"
+        - "3 days per week"
+        - "4 days per week"
+        - "5 days per week"
+        - "6 days per week"
+        - "Every day"
+        - "Unknown"
+    smoking_frequency:
+      description: "How often do you smoke now? IMPORTANT: Use exact string matching with the values below. Use p.smoking_frequency = 'Never Smoked', NOT CONTAINS or partial matching."
+      values:
+        - "Every day"
+        - "At least once a week, but not every day"
+        - "Less than once a week"
+        - "I no longer smoke"
+        - "Never Smoked"
+        - "Smoked"
+        - "Not applicable"
+        - "Unknown"
+    vaping_frequency:
+      description: "How often do you vape now?"
+      values:
+        - "Every day"
+        - "At least once a week, but not every day"
+        - "Less than once a week"
+        - "I no longer vape"
+        - "Never Vaped"
+        - "Vaped"
+        - "Not applicable"
+        - "Unknown"
+    cannabis_days:
+      description: "On how many days used weed or hash in last 4 weeks?"
+      values:
+        - "Never Used Cannabis"
+        - "1 or 2 days"
+        - "3 to 5 days"
+        - "6 to 9 days"
+        - "10 days or more"
+        - "Used Cannabis"
+        - "Not applicable"
+        - "Unknown"
+    ever_used_laughing_gas:
+      description: "Have you ever used laughing gas?"
+      values:
+        - "Never Used Laughing Gas"
+        - "Yes, in the last 4 weeks"
+        - "Yes, but more than 4 weeks ago"
+        - "Used Laughing Gas"
+        - "Unknown"
+    ever_used_other_drugs:
+      description: "Ever used drugs"
+      values:
+        - "No"
+        - "Yes"
+        - "Unknown"
+    friends_alcohol:
+      description: "How many of your friends drink alcohol?"
+      values:
+        - "None"
+        - "Some"
+        - "Most"
+        - "(Almost) all"
+        - "Unknown"
+    friends_smoking:
+      description: "How many of your friends smoke cigarettes?"
+      values:
+        - "None"
+        - "Some"
+        - "Most"
+        - "(Almost) all"
+        - "Unknown"
+        - "NA"
+    friends_cannabis:
+      description: "How many of your friends smoke hash or weed?"
+      values:
+        - "None"
+        - "Some"
+        - "Most"
+        - "(Almost) all"
+        - "Unknown"
+    gaming_frequency:
+      description: "How often do you game?"
+      values:
+        - "(Almost) never"
+        - "Less than 1 day per week"
+        - "1 day per week"
+        - "2 or 3 days per week"
+        - "4 or 5 days per week"
+        - "(Almost) every day"
+        - "Unknown"
+    school_safety:
+      description: "I feel safe at school"
+      values:
+        - "Strongly disagree"
+        - "Disagree"
+        - "Neither agree nor disagree"
+        - "Agree"
+        - "Strongly agree"
+        - "Unknown"
+    school_theft:
+      description: "Stealing things from school or from students"
+      values:
+        - "Never"
+        - "Almost never"
+        - "Sometimes"
+        - "Often"
+        - "I don't know"
+        - "Unknown"
+    school_cannabis:
+      description: "Smoking weed by students in school or on school grounds"
+      values:
+        - "Never"
+        - "Almost never"
+        - "Sometimes"
+        - "Often"
+        - "I don't know"
+        - "Unknown"
+    school_drug_dealing:
+      description: "Dealing (offering and/or selling) drugs in or around school"
+      values:
+        - "Never"
+        - "Almost never"
+        - "Sometimes"
+        - "Often"
+        - "I don't know"
+        - "Unknown"
+    fruit_days:
+      description: "How many days per week do you eat fruit?"
+      values:
+        - "(Almost) never"
+        - "1 day per week"
+        - "2 days per week"
+        - "3 days per week"
+        - "4 days per week"
+        - "5 days per week"
+        - "6 days per week"
+        - "Every day"
+        - "Unknown"
+    vegetable_days:
+      description: "How many days per week do you eat vegetables?"
+      values:
+        - "(Almost) never"
+        - "1 day per week"
+        - "2 days per week"
+        - "3 days per week"
+        - "4 days per week"
+        - "5 days per week"
+        - "6 days per week"
+        - "Every day"
+        - "Unknown"
+    water_days:
+      description: "How many days per week do you drink water (at least one glass)?"
+      values:
+        - "(Almost) never"
+        - "Not Every Day"
+        - "1 day per week"
+        - "2 days per week"
+        - "3 days per week"
+        - "4 days per week"
+        - "5 days per week"
+        - "6 days per week"
+        - "Every day"
+        - "Unknown"
+    energy_drink_days:
+      description: "How many days per week do you drink energy drinks?"
+      values:
+        - "(Almost) never"
+        - "At least Once a Week"
+        - "1 day per week"
+        - "2 days per week"
+        - "3 days per week"
+        - "4 days per week"
+        - "5 days per week"
+        - "6 days per week"
+        - "Every day"
+        - "Unknown"
+    online_gambling:
+      description: "Have you played ONLINE gambling games in the last 12 months? If so, did you play for money?"
+      values:
+        - "No"
+        - "Yes, DID NOT play for money"
+        - "Yes, DID play for money"
+        - "Yes, SOMETIMES played for money"
+        - "Unknown"

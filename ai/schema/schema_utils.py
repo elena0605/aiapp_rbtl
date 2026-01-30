@@ -27,6 +27,28 @@ except Exception:
 
 
 # ============================================================================
+# Property Exclusion List
+# ============================================================================
+
+# Properties to exclude from schema (sensitive data or unnecessary for query generation)
+EXCLUDED_PROPERTIES: Dict[str, List[str]] = {
+    "Person": [
+        "UserID",  # Sensitive data - never return in queries
+        # Add other Person properties to exclude here if needed
+        # Example: "youtube_use", "tiktok_use", etc.
+    ],
+    # Add other node types and their excluded properties here if needed
+    # "TikTokUser": ["some_property"],
+}
+
+
+def _should_exclude_property(node_label: str, property_name: str) -> bool:
+    """Check if a property should be excluded from the schema."""
+    excluded = EXCLUDED_PROPERTIES.get(node_label, [])
+    return property_name in excluded
+
+
+# ============================================================================
 # Schema Extraction
 # ============================================================================
 
@@ -81,8 +103,20 @@ def _get_schema_via_apoc(driver: neo4j.Driver) -> dict[str, Any]:
         data["output"] for data in [r.data() for r in rel_query_response.records]
     ]
 
+    # Filter out excluded properties
+    filtered_node_props = {}
+    for el in node_properties:
+        label = el["labels"]
+        props = el["properties"]
+        filtered_props = [
+            prop for prop in props
+            if not _should_exclude_property(label, prop.get("property", ""))
+        ]
+        if filtered_props:  # Only add if there are properties left
+            filtered_node_props[label] = filtered_props
+
     return {
-        "node_props": {el["labels"]: el["properties"] for el in node_properties},
+        "node_props": filtered_node_props,
         "rel_props": {el["type"]: el["properties"] for el in rel_properties},
         "relationships": relationships,
     }
@@ -97,6 +131,9 @@ def _get_schema_via_builtin(driver: neo4j.Driver) -> dict[str, Any]:
         row = rec.data()
         label = row.get("nodeType") or "Unknown"
         prop_name = row.get("propertyName") or "property"
+        # Filter out excluded properties
+        if _should_exclude_property(label, prop_name):
+            continue
         prop_types = row.get("propertyTypes")
         prop_type_str = ",".join(prop_types) if isinstance(prop_types, list) else str(prop_types)
         node_dict.setdefault(label, []).append({"property": prop_name, "type": prop_type_str})
