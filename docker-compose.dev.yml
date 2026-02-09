@@ -1,4 +1,3 @@
-version: '3.8'
 
 # Development override - adds volume mounts for hot-reload
 services:

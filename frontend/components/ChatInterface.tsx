@@ -220,19 +220,23 @@ export default function ChatInterface({
   }, [])
 
 
-  const transformMessageRecord = (record: ChatMessageRecord): Message => ({
-    id: record.id || `${record.timestamp}-${record.role}`,
-    role: record.role,
-    content: record.content,
-    cypher: record.cypher,
-    results: record.results,
-    summary: record.summary,
-    examples: record.examples,
-    error: record.error,
-    timestamp: new Date(record.timestamp),
-    isFavorite: record.is_favorite,
-    timings: (record as any).timings, // Timings might be stored in the record
-  })
+  const transformMessageRecord = (record: ChatMessageRecord): Message => {
+    // If there's an error, don't include success-related fields even if they exist in the record
+    const hasError = !!(record.error && record.error.trim())
+    return {
+      id: record.id || `${record.timestamp}-${record.role}`,
+      role: record.role,
+      content: record.content,
+      cypher: record.cypher,
+      results: hasError ? undefined : record.results,
+      summary: hasError ? undefined : record.summary,
+      examples: hasError ? undefined : record.examples,
+      error: record.error,
+      timestamp: new Date(record.timestamp),
+      isFavorite: record.is_favorite,
+      timings: hasError ? undefined : (record as any).timings, // Don't show timings for errors
+    }
+  }
 
   useEffect(() => {
     const loadHistory = async (username: string) => {
@@ -302,22 +306,47 @@ export default function ChatInterface({
         controller.signal
       )
       
+      // Set content to error message if there's an error, otherwise use summary
+      // When there's an error, prioritize it and don't show success messages
+      const hasError = !!(response.error && response.error.trim())
+      console.log('ChatInterface: Response received', { 
+        hasError, 
+        error: response.error, 
+        summary: response.summary,
+        examples: response.examples_used,
+        timings: response.timings
+      })
+      
+      // ALWAYS prioritize error over summary - if error exists, use it as content
+      let content: string
+      if (hasError && response.error) {
+        content = response.error.trim()
+        console.log('ChatInterface: Error detected, using error as content:', content)
+      } else {
+        content = response.summary || 'Query executed successfully'
+        console.log('ChatInterface: No error, using summary as content:', content)
+      }
+      
       const assistantMessage: Message = {
         id: response.message_id || (Date.now() + 1).toString(),
         role: 'assistant',
-        content: response.summary || 'Query executed successfully',
-        route_type: response.route_type,
-        tool_name: response.tool_name,
-        tool_inputs: response.tool_inputs,
-        cypher: response.cypher,
-        results: response.results,
-        summary: response.summary,
-        examples: response.examples_used,
+        content: content,  // This is already set to error message if hasError is true
+        route_type: hasError ? undefined : response.route_type,  // Don't show route type for errors
+        tool_name: hasError ? undefined : response.tool_name,
+        tool_inputs: hasError ? undefined : response.tool_inputs,
+        cypher: response.cypher,  // Keep cypher for debugging even on error
+        results: hasError ? undefined : response.results,  // Don't show results for errors
+        summary: undefined,  // Never show summary when there's an error - content already has the error
+        examples: hasError ? undefined : response.examples_used,  // Don't show examples for errors
         error: response.error,
         timestamp: new Date(),
         isFavorite: false,
-        timings: response.timings,
+        timings: hasError ? undefined : response.timings,  // Don't show timings for errors
       }
+      
+      // Log the final message to debug
+      console.log('ChatInterface: Final message content:', assistantMessage.content)
+      console.log('ChatInterface: Has error?', hasError, 'Error:', assistantMessage.error)
       
       // Update route type and tool for progress display
       if (response.route_type) {

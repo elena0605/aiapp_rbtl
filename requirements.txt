@@ -42,3 +42,9 @@ mkdocs-material>=9.5
 mkdocs-mermaid2-plugin>=1.0.7
 mkdocs-glightbox>=0.3.6
 pymdown-extensions>=10.8
+
+# Cypher Query Validation
+# NOTE: CyVer requires Python >= 3.10
+# Install from GitLab: pip install git+https://gitlab.com/netmode/CyVer.git
+# If Python < 3.10, the read-only validation will still work, but CyVer validation will be skipped
+CyVer>=2.0.0

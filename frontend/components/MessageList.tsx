@@ -129,7 +129,13 @@ export default function MessageList({
                 )}
               </div>
             </div>
-            <div className="whitespace-pre-wrap break-words overflow-wrap-anywhere">{message.content}</div>
+            {message.error ? (
+              <div className="whitespace-pre-wrap break-words overflow-wrap-anywhere text-red-600 font-medium">
+                {message.content}
+              </div>
+            ) : (
+              <div className="whitespace-pre-wrap break-words overflow-wrap-anywhere">{message.content}</div>
+            )}
             
             {message.cypher && (
               <div className="mt-3 max-w-full overflow-x-auto">
@@ -174,9 +180,12 @@ export default function MessageList({
               </div>
             )}
             
-            {message.error && (
-              <div className="mt-3 text-red-600 text-sm">
-                Error: {message.error}
+            {message.error && message.cypher && (
+              <div className="mt-3 p-2 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+                <div className="font-semibold mb-1">Validation Details:</div>
+                <div className="mt-1 font-mono text-xs bg-red-100 p-2 rounded">
+                  Generated Query: {message.cypher}
+                </div>
               </div>
             )}
           </div>

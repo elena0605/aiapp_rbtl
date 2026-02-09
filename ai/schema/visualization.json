@@ -48,9 +48,7 @@
     {
       "name": "TikTokComment",
       "indexes": [],
-      "constraints": [
-        "Constraint( id=4, name='tiktok_comment_id_unique', type='UNIQUENESS', schema=(:TikTokComment {comment_id}), ownedIndex=3 )"
-      ]
+      "constraints": []
     },
     {
       "name": "YouTubeVideo",
@@ -59,259 +57,95 @@
     },
     {
       "name": "QueryExample",
-      "indexes": [
-        "embedding"
-      ],
-      "constraints": []
-    },
-    {
-      "name": "Person",
       "indexes": [],
       "constraints": []
     },
     {
       "name": "TikTokVideo",
       "indexes": [],
-      "constraints": [
-        "Constraint( id=6, name='tiktok_video_id_unique', type='UNIQUENESS', schema=(:TikTokVideo {video_id}), ownedIndex=5 )"
-      ]
+      "constraints": []
     }
   ],
   "relationships": [
     [
-      {
-        "name": "TikTokVideo",
-        "indexes": [],
-        "constraints": [
-          "Constraint( id=6, name='tiktok_video_id_unique', type='UNIQUENESS', schema=(:TikTokVideo {video_id}), ownedIndex=5 )"
-        ]
-      },
+      "TikTokVideo",
       "HAS_STICKER",
-      {
-        "name": "TikTokSticker",
-        "indexes": [],
-        "constraints": []
-      }
+      "TikTokSticker"
     ],
     [
-      {
-        "name": "TikTokVideo",
-        "indexes": [],
-        "constraints": [
-          "Constraint( id=6, name='tiktok_video_id_unique', type='UNIQUENESS', schema=(:TikTokVideo {video_id}), ownedIndex=5 )"
-        ]
-      },
+      "TikTokVideo",
       "HAS_COMMENT",
-      {
-        "name": "TikTokComment",
-        "indexes": [],
-        "constraints": [
-          "Constraint( id=4, name='tiktok_comment_id_unique', type='UNIQUENESS', schema=(:TikTokComment {comment_id}), ownedIndex=3 )"
-        ]
-      }
+      "TikTokComment"
     ],
     [
-      {
-        "name": "Area",
-        "indexes": [],
-        "constraints": []
-      },
+      "Area",
       "BELONGS_TO",
-      {
-        "name": "Municipality",
-        "indexes": [],
-        "constraints": []
-      }
+      "Municipality"
     ],
     [
-      {
-        "name": "Person",
-        "indexes": [],
-        "constraints": []
-      },
-      "LIVES_IN_MUNICIPALITY",
-      {
-        "name": "Municipality",
-        "indexes": [],
-        "constraints": []
-      }
-    ],
-    [
-      {
-        "name": "Person",
-        "indexes": [],
-        "constraints": []
-      },
+      "Municipality",
       "FOLLOWS",
-      {
-        "name": "Influencer",
-        "indexes": [],
-        "constraints": []
-      }
+      "Influencer"
     ],
     [
-      {
-        "name": "YouTubeVideo",
-        "indexes": [],
-        "constraints": []
-      },
+      "Area",
+      "FOLLOWS",
+      "Influencer"
+    ],
+    [
+      "YouTubeVideo",
       "HAS_TOPIC",
-      {
-        "name": "YoutubeVideoTopic",
-        "indexes": [],
-        "constraints": []
-      }
+      "YoutubeVideoTopic"
     ],
     [
-      {
-        "name": "Person",
-        "indexes": [],
-        "constraints": []
-      },
-      "LIVES_IN_AREA",
-      {
-        "name": "Area",
-        "indexes": [],
-        "constraints": []
-      }
-    ],
-    [
-      {
-        "name": "YouTubeVideo",
-        "indexes": [],
-        "constraints": []
-      },
+      "TikTokVideo",
       "HAS_TAG",
-      {
-        "name": "YoutubeVideoTag",
-        "indexes": [],
-        "constraints": []
-      }
+      "TikTokHashTag"
     ],
     [
-      {
-        "name": "TikTokVideo",
-        "indexes": [],
-        "constraints": [
-          "Constraint( id=6, name='tiktok_video_id_unique', type='UNIQUENESS', schema=(:TikTokVideo {video_id}), ownedIndex=5 )"
-        ]
-      },
+      "YouTubeVideo",
       "HAS_TAG",
-      {
-        "name": "TikTokHashTag",
-        "indexes": [],
-        "constraints": []
-      }
+      "YoutubeVideoTag"
     ],
     [
-      {
-        "name": "TikTokVideo",
-        "indexes": [],
-        "constraints": [
-          "Constraint( id=6, name='tiktok_video_id_unique', type='UNIQUENESS', schema=(:TikTokVideo {video_id}), ownedIndex=5 )"
-        ]
-      },
+      "TikTokVideo",
       "HAS_TAG",
-      {
-        "name": "YoutubeVideoTag",
-        "indexes": [],
-        "constraints": []
-      }
+      "YoutubeVideoTag"
     ],
     [
-      {
-        "name": "YouTubeVideo",
-        "indexes": [],
-        "constraints": []
-      },
+      "YouTubeVideo",
       "HAS_TAG",
-      {
-        "name": "TikTokHashTag",
-        "indexes": [],
-        "constraints": []
-      }
+      "TikTokHashTag"
     ],
     [
-      {
-        "name": "YouTubeChannel",
-        "indexes": [],
-        "constraints": []
-      },
+      "YouTubeChannel",
       "HAS_VIDEO",
-      {
-        "name": "YouTubeVideo",
-        "indexes": [],
-        "constraints": []
-      }
+      "TikTokVideo"
     ],
     [
-      {
-        "name": "YouTubeChannel",
-        "indexes": [],
-        "constraints": []
-      },
+      "YouTubeChannel",
       "HAS_VIDEO",
-      {
-        "name": "TikTokVideo",
-        "indexes": [],
-        "constraints": [
-          "Constraint( id=6, name='tiktok_video_id_unique', type='UNIQUENESS', schema=(:TikTokVideo {video_id}), ownedIndex=5 )"
-        ]
-      }
+      "YouTubeVideo"
     ],
     [
-      {
-        "name": "TikTokUser",
-        "indexes": [],
-        "constraints": []
-      },
+      "TikTokUser",
       "HAS_VIDEO",
-      {
-        "name": "TikTokVideo",
-        "indexes": [],
-        "constraints": [
-          "Constraint( id=6, name='tiktok_video_id_unique', type='UNIQUENESS', schema=(:TikTokVideo {video_id}), ownedIndex=5 )"
-        ]
-      }
+      "YouTubeVideo"
     ],
     [
-      {
-        "name": "TikTokUser",
-        "indexes": [],
-        "constraints": []
-      },
+      "TikTokUser",
       "HAS_VIDEO",
-      {
-        "name": "YouTubeVideo",
-        "indexes": [],
-        "constraints": []
-      }
+      "TikTokVideo"
     ],
     [
-      {
-        "name": "Influencer",
-        "indexes": [],
-        "constraints": []
-      },
+      "Influencer",
       "HAS_ACCOUNT",
-      {
-        "name": "TikTokUser",
-        "indexes": [],
-        "constraints": []
-      }
+      "TikTokUser"
     ],
     [
-      {
-        "name": "Influencer",
-        "indexes": [],
-        "constraints": []
-      },
+      "Influencer",
       "HAS_ACCOUNT",
-      {
-        "name": "YouTubeChannel",
-        "indexes": [],
-        "constraints": []
-      }
+      "YouTubeChannel"
     ]
   ]
 }

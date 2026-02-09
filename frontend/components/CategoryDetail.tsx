@@ -48,21 +48,34 @@ export default function CategoryDetail({ queries, categoryName, onDelete, onEdit
           key={index}
           className="bg-white border border-gray-300 rounded-lg p-4 shadow-sm relative group"
         >
-          <div className="absolute top-4 right-4 flex space-x-2">
+          <div className="absolute top-4 right-4 flex space-x-2 z-50 pointer-events-auto">
             <button
-              onClick={() => onEdit(query)}
-              className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+              onClick={(e) => {
+                e.stopPropagation()
+                e.preventDefault()
+                console.log('Edit button clicked', query)
+                onEdit(query)
+              }}
+              type="button"
+              className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors bg-white shadow-md border border-gray-200 cursor-pointer"
               aria-label="Edit query"
               title="Edit query"
+              style={{ pointerEvents: 'auto' }}
             >
               <Edit2 size={18} />
             </button>
             <button
-              onClick={() => handleDelete(query, index)}
+              onClick={(e) => {
+                e.stopPropagation()
+                e.preventDefault()
+                handleDelete(query, index)
+              }}
+              type="button"
               disabled={deletingIndex === index}
-              className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-white shadow-md border border-gray-200 cursor-pointer"
               aria-label="Delete query"
               title="Delete query"
+              style={{ pointerEvents: 'auto' }}
             >
               {deletingIndex === index ? (
                 <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-red-600"></div>

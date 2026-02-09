@@ -1,8 +1,7 @@
 nodes:
-  Person: "This node represents the young people or participants in our study, basically the people whose behavior and preferences we are analyzing. When someone says 'youth', 'participants', or 'people', they should think of this node. This node NEVER REPRESENTS AN INFLUENCER."
-  Influencer: "Influencers are individuals who create content online. In our graph model, influencers can be either on Tiktok (TikTokUser) or YouTube (YouTubeChannel) social media platforms. Our participants name these influencers as those they follow on social media platforms. So, an Influencer node captures these popular figures the participants (Person node) care about."
-  Area: "The Area node represents a specific geographic neighborhood or district where a participant lives. Currently, in our graph schema only areas within Rotterdam Municipality are supported. Never generate a cypher query when area that doesn't belong to Rotterdam municipality is requested. For instance, Charlois or Feijenoord would be valid Area nodes. Area nodes help us group people by where they reside, and derive area-based differences in behaviours."
-  Municipality: "This is a larger administrative region that includes many Areas. For example, Rotterdam itself is a Municipality containing various Areas. We only support municipalities coming from the Rotterdam Rijmond Region. Never generate a cypher query when municipality that doesn't belong to Rotterdam Rijmond region is requested. "
+  Influencer: "Influencers are individuals who create content online. In our graph model, influencers can be either on Tiktok (TikTokUser) or YouTube (YouTubeChannel) social media platforms. Areas and Municipalities follow these influencers, representing the aggregated preferences of people living in those geographic regions."
+  Area: "The Area node represents a specific geographic neighborhood or district. Currently, in our graph schema only areas within Rotterdam Municipality are supported. Never generate a cypher query when area that doesn't belong to Rotterdam municipality is requested. For instance, Charlois or Feijenoord would be valid Area nodes. IMPORTANT: Area nodes contain aggregated person data as array properties (e.g., person_age: StringArray, person_smoking_frequency: StringArray). These arrays represent the behaviors and characteristics of all people living in that area. When querying about people, youth, participants, individual characteristics, or querying for aggregated values from these properties, you must query these aggregated array properties on Area or Municipality nodes. Area nodes can follow Influencers via the FOLLOWS relationship."
+  Municipality: "This is a larger administrative region that includes many Areas. For example, Rotterdam itself is a Municipality containing various Areas. We only support municipalities coming from the Rotterdam Rijmond Region. Never generate a cypher query when municipality that doesn't belong to Rotterdam Rijmond region is requested. IMPORTANT: Municipality nodes contain aggregated person data as array properties (e.g., person_age: StringArray, person_smoking_frequency: StringArray). These arrays represent the behaviors and characteristics of all people living in that municipality. When querying about people, youth, participants, individual characteristics, or querying for aggregated values from these properties, you must query these aggregated array properties on Municipality or Area nodes. Municipality nodes can follow Influencers via the FOLLOWS relationship."
   TikTokUser: "This node stands for a TikTok account that belongs to an Influencer. It's the representation of the influencer's presence on the TikTok platform."
   YouTubeChannel: "Similar to TiktokUser, this node represents an Influencer's YouTube channel, reflecting their presence on YouTube."
   TikTokVideo: "Tiktok Videos are the pieces of content published by TikTok influencers. These nodes capture details related to video content published by the TikTok influencer."
@@ -14,30 +13,32 @@ nodes:
   YoutubeVideoTag: "Tags on YouTube videos work like keywords, and the Tag node captures these to help categorize YouTubeVideo by topic or theme."
   YoutubeVideoTopic: "Topic nodes on youtube videos represent the subject matter or themes of videos, like 'news', 'sports', or 'entertainment'. This helps us analyze what kinds of content participants are being exposed to."
 relationships:
-  LIVES_IN_AREA: "This relationship connects a Person node to the Area node where they live. It tells us the geographic context (on area level) of each participant. Area is part of a municipality. The only area-level data we have is from Rotterdam's municipality areas."
-  LIVES_IN_MUNICIPALITY: "This relationship connects a Person node to the Municipality node where they live. It tells us the geographic context (on municipality level) of each participant. We only support municipalities from Rotterdam Rijmond Region."
   BELONGS_TO: "An Area belongs to a Municipality, so this relationship represents the geographic hierarchy—like a neighborhood inside a city."
-  HAS_ACCOUNT: "This connects an Influencer to their TikTok or YouTube platform accounts (TikTokUser or YouTubeChannel), forming a bridge between the person and their social media presence on TikTok or YouTube."
+  HAS_ACCOUNT: "This connects an Influencer to their TikTok or YouTube platform accounts (TikTokUser or YouTubeChannel), forming a bridge between the influencer and their social media presence on TikTok or YouTube."
   HAS_VIDEO: "This relationship shows that an influencer, i.e. TikTokUser or YouTubeChannel published a particular video—in other words, it captures content creation."
   HAS_TAG: "Indicates that a Youtube or TikTok video includes a specific hashtag (TikTokHashTag or YoutubeVideoTag), helping us track how videos are categorized or spread."
   HAS_STICKER: "Connects a TikTok video to stickers used, showing the extra graphic details added to videos."
   HAS_COMMENT: "Links a TikTokVideo or YouTubeVideo to comments made by viewers or followers (TikTokComment or YouTubeComment), capturing audience engagement."
-  HAS_TOPIC: "This connects a YouTube video to its Topic, specifying what the content is about. This helps us analyze trends in exposure and content types participants consume."
-  FOLLOWS: "This relationship shows that a Person follows an Influencer on a social media platform. It tells us which influencers each participant is interested in."
+  HAS_TOPIC: "This connects a YouTube video to its Topic, specifying what the content is about. This helps us analyze trends in exposure and content types."
+  FOLLOWS: "This relationship shows that an Area or Municipality follows an Influencer. The count property on the relationship indicates how many people in that geographic region follow the influencer. This represents aggregated following behavior at the area or municipality level."
 properties:
-  Person:
-    _note: "IMPORTANT: Most Person properties are STRING types and require exact string matching (p.property = 'exact value'). Do NOT use numeric conversions, CONTAINS, or partial matching. Exceptions: gender and school_year are numeric (Long) - use numeric comparisons for these. For all other properties, match the exact string values listed below. RETURN CLAUSE: Only return properties that are explicitly mentioned in the user's question or directly related to the query criteria. Do NOT include unrelated properties like feels_happy, has_mental_health_issues unless the user specifically asks for them. SECURITY: UserID is SENSITIVE DATA and must NEVER be returned in queries, even if explicitly requested by the user. Never include p.UserID or UserID in RETURN clauses."
-    gender:
-      description: "Gender in two categories - IMPORTANT: When returning gender in Cypher queries, ALWAYS use a CASE statement to map numeric codes to labels: CASE WHEN p.gender = 1 THEN 'Boy' WHEN p.gender = 2 THEN 'Girl' WHEN p.gender = 9 THEN 'Unknown' ELSE 'Unknown' END AS gender. Never return the raw numeric value (1, 2, 9) - always map to the human-readable label."
+  Area:
+    _note: "IMPORTANT: Person data is aggregated as arrays on Area nodes. Properties prefixed with 'person_' (e.g., person_age, person_smoking_frequency) are StringArray or LongArray types containing aggregated values for all people in that area. Area nodes also have direct properties like area_name, population_density, income_household_wealth_median, etc."
+  Municipality:
+    _note: "IMPORTANT: Person data is aggregated as arrays on Municipality nodes. Properties prefixed with 'person_' (e.g., person_age, person_smoking_frequency) are StringArray or LongArray types containing aggregated values for all people in that municipality. Municipality nodes also have direct properties like municipality_name, population_density, income_household_wealth_median, etc."
+  Person_aggregated_properties:
+    _note: "CRITICAL: These properties are stored as StringArray or LongArray on Area and Municipality nodes with the prefix 'person_'. The values listed below are the values that can be found in these arrays."
+    person_gender:
+      description: "Gender aggregated as LongArray on Area/Municipality nodes. Values: 1=Boy, 2=Girl, null=Unanswered/Unknown."
       values:
         - value: 1
           meaning: "Boy"
         - value: 2
           meaning: "Girl"
-        - value: 9
-          meaning: "Unknown"
-    school_year:
-      description: "In which grade/year are you? NOTE: This is a numeric (Long) property, use numeric comparison like p.school_year = 4. The value 'Unknown' may be stored as NULL."
+        - value: null
+          meaning: "Unanswered/Unknown"
+    person_school_year:
+      description: "School year/grade aggregated as LongArray on Area/Municipality nodes."
       values:
         - 1
         - 2
@@ -46,8 +47,8 @@ properties:
         - 5
         - 6
         - "Unknown"
-    education_type4:
-      description: "Type of education"
+    person_education_type4:
+      description: "Type of education."
       values:
         - "Vmbo-bk"
         - "Vmbo-gt"
@@ -55,8 +56,8 @@ properties:
         - "Vwo"
         - "Other education"
         - "Unknown"
-    age:
-      description: "Age in years - IMPORTANT: This is a STRING property, not numeric. You MUST match the exact string value. Do NOT convert to integer or extract numbers. Use exact string equality like p.age = '16 years old', NOT toInteger(p.age) = 16"
+    person_age:
+      description: "Age aggregated as StringArray on Area/Municipality nodes. IMPORTANT: This is a STRING array, not numeric."
       values:
         - "12 years old or younger"
         - "13 years old"
@@ -65,44 +66,44 @@ properties:
         - "16 years old"
         - "17 years old or older"
         - "Unknown"
-    feels_happy:
+    person_feels_happy:
       description: "Usually feels (very) happy"
       values:
         - "No, feels (very) unhappy or neutral (score 1, 2, or 3)"
         - "Yes (score 4 or 5)"
         - "Unknown"
-    has_mental_health_issues:
+    person_has_mental_health_issues:
       description: "Has mental health issues"
       values:
         - "No"
         - "Yes"
         - "Unknown"
-    recovers_quickly:
+    person_recovers_quickly:
       description: "Recovers quickly after a difficult period"
       values:
         - "No / Neutral"
         - "Yes"
         - "Unknown"
-    handles_stress_well:
+    person_handles_stress_well:
       description: "Does not find it difficult to withstand stressful events"
       values:
         - "No, finds it difficult / neutral"
         - "Yes, does not find it difficult"
         - "Unknown"
-    future_confidence_categories:
+    person_future_confidence:
       description: "Confidence in the future"
       values:
         - "Little to no trust in their own future (score 5 or lower)"
         - "Moderate/fair trust in their own future (score 6 or 7)"
         - "(Very) high trust in their own future (score 8 or higher)"
         - "Unknown"
-    often_lonely:
+    person_often_lonely:
       description: "Often to always lonely in the last 4 weeks"
       values:
         - "(Almost) never / Sometimes"
         - "Often / (Almost) always"
         - "Unknown"
-    sports_club:
+    person_sports_club:
       description: "How often do you participate in sports at a club or gym?"
       values:
         - "(Almost) never"
@@ -112,7 +113,7 @@ properties:
         - "4 to 6 days per week"
         - "Every day"
         - "Unknown"
-    sports_leisure:
+    person_sports_leisure:
       description: "How often do you exercise or play sports in your free time without a club or gym?"
       values:
         - "(Almost) never"
@@ -122,7 +123,7 @@ properties:
         - "4 to 6 days per week"
         - "Every day"
         - "Unknown"
-    drunk_lifetime:
+    person_drunk_lifetime:
       description: "How often drunk/tipsy in entire life?"
       values:
         - "Never Drunk"
@@ -134,7 +135,7 @@ properties:
         - "Drunk"
         - "Not applicable"
         - "Unknown"
-    breakfast_days:
+    person_breakfast_days:
       description: "How many days per week do you have breakfast?"
       values:
         - "(Almost) never"
@@ -147,8 +148,8 @@ properties:
         - "6 days per week"
         - "Every day"
         - "Unknown"
-    smoking_frequency:
-      description: "How often do you smoke now? IMPORTANT: Use exact string matching with the values below. Use p.smoking_frequency = 'Never Smoked', NOT CONTAINS or partial matching."
+    person_smoking_frequency:
+      description: "How often do you smoke?"
       values:
         - "Every day"
         - "At least once a week, but not every day"
@@ -158,7 +159,7 @@ properties:
         - "Smoked"
         - "Not applicable"
         - "Unknown"
-    vaping_frequency:
+    person_vaping_frequency:
       description: "How often do you vape now?"
       values:
         - "Every day"
@@ -169,7 +170,7 @@ properties:
         - "Vaped"
         - "Not applicable"
         - "Unknown"
-    cannabis_days:
+    person_cannabis_days:
       description: "On how many days used weed or hash in last 4 weeks?"
       values:
         - "Never Used Cannabis"
@@ -180,7 +181,7 @@ properties:
         - "Used Cannabis"
         - "Not applicable"
         - "Unknown"
-    ever_used_laughing_gas:
+    person_ever_used_laughing_gas:
       description: "Have you ever used laughing gas?"
       values:
         - "Never Used Laughing Gas"
@@ -188,13 +189,13 @@ properties:
         - "Yes, but more than 4 weeks ago"
         - "Used Laughing Gas"
         - "Unknown"
-    ever_used_other_drugs:
+    person_ever_used_other_drugs:
       description: "Ever used drugs"
       values:
         - "No"
         - "Yes"
         - "Unknown"
-    friends_alcohol:
+    person_friends_alcohol:
       description: "How many of your friends drink alcohol?"
       values:
         - "None"
@@ -202,7 +203,7 @@ properties:
         - "Most"
         - "(Almost) all"
         - "Unknown"
-    friends_smoking:
+    person_friends_smoking:
       description: "How many of your friends smoke cigarettes?"
       values:
         - "None"
@@ -211,7 +212,7 @@ properties:
         - "(Almost) all"
         - "Unknown"
         - "NA"
-    friends_cannabis:
+    person_friends_cannabis:
       description: "How many of your friends smoke hash or weed?"
       values:
         - "None"
@@ -219,7 +220,7 @@ properties:
         - "Most"
         - "(Almost) all"
         - "Unknown"
-    gaming_frequency:
+    person_gaming_frequency:
       description: "How often do you game?"
       values:
         - "(Almost) never"
@@ -229,7 +230,7 @@ properties:
         - "4 or 5 days per week"
         - "(Almost) every day"
         - "Unknown"
-    school_safety:
+    person_school_safety:
       description: "I feel safe at school"
       values:
         - "Strongly disagree"
@@ -238,7 +239,7 @@ properties:
         - "Agree"
         - "Strongly agree"
         - "Unknown"
-    school_theft:
+    person_school_theft:
       description: "Stealing things from school or from students"
       values:
         - "Never"
@@ -247,7 +248,7 @@ properties:
         - "Often"
         - "I don't know"
         - "Unknown"
-    school_cannabis:
+    person_school_cannabis:
       description: "Smoking weed by students in school or on school grounds"
       values:
         - "Never"
@@ -256,7 +257,7 @@ properties:
         - "Often"
         - "I don't know"
         - "Unknown"
-    school_drug_dealing:
+    person_school_drug_dealing:
       description: "Dealing (offering and/or selling) drugs in or around school"
       values:
         - "Never"
@@ -265,7 +266,7 @@ properties:
         - "Often"
         - "I don't know"
         - "Unknown"
-    fruit_days:
+    person_fruit_days:
       description: "How many days per week do you eat fruit?"
       values:
         - "(Almost) never"
@@ -277,7 +278,7 @@ properties:
         - "6 days per week"
         - "Every day"
         - "Unknown"
-    vegetable_days:
+    person_vegetable_days:
       description: "How many days per week do you eat vegetables?"
       values:
         - "(Almost) never"
@@ -289,7 +290,7 @@ properties:
         - "6 days per week"
         - "Every day"
         - "Unknown"
-    water_days:
+    person_water_days:
       description: "How many days per week do you drink water (at least one glass)?"
       values:
         - "(Almost) never"
@@ -302,7 +303,7 @@ properties:
         - "6 days per week"
         - "Every day"
         - "Unknown"
-    energy_drink_days:
+    person_energy_drink_days:
       description: "How many days per week do you drink energy drinks?"
       values:
         - "(Almost) never"
@@ -315,7 +316,7 @@ properties:
         - "6 days per week"
         - "Every day"
         - "Unknown"
-    online_gambling:
+    person_online_gambling:
       description: "Have you played ONLINE gambling games in the last 12 months? If so, did you play for money?"
       values:
         - "No"

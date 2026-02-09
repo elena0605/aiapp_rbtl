@@ -8,6 +8,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from utils.neo4j import get_driver, close_driver, get_session
+from utils.cypher_validator import validate_cypher, CypherValidationError, ReadOnlyViolationError
 from ai.schema.schema_utils import get_cached_schema, fetch_schema_from_neo4j
 from ai.terminology.loader import load as load_terminology, as_text as terminology_as_text
 from ai.fewshots.loader import load_text as load_examples_text
@@ -18,6 +19,37 @@ from dotenv import load_dotenv  # type: ignore
 
 
 def run_cypher(query: str):
+    """Execute a Cypher query after validation.
+    
+    Validates the query using CyVer before execution. If validation fails,
+    raises CypherValidationError. If CyVer is not available, raises RuntimeError
+    unless SKIP_CYPHER_VALIDATION environment variable is set.
+    """
+    # Check if validation should be skipped
+    skip_validation = os.environ.get("SKIP_CYPHER_VALIDATION", "").lower() in {"1", "true", "yes"}
+    
+    if not skip_validation:
+        # Validate query before execution (includes read-only check)
+        try:
+            is_valid, validation_details = validate_cypher(query, strict=True, enforce_read_only=True)
+            if not is_valid:
+                raise CypherValidationError(
+                    "Cypher query validation failed",
+                    validation_details
+                )
+        except (CypherValidationError, ReadOnlyViolationError):
+            # Re-raise validation errors (including read-only violations)
+            raise
+        except RuntimeError as e:
+            # If CyVer is not installed and validation is required, raise error
+            error_msg = str(e)
+            if "not installed" in error_msg or "not available" in error_msg.lower():
+                raise RuntimeError(
+                    f"Cypher validation is required but CyVer is not available: {e}. "
+                    "Install with: pip install CyVer, or set SKIP_CYPHER_VALIDATION=true to skip validation."
+                ) from e
+            raise
+    
     # Open a new session and execute the query, return list of dict rows
     with get_session() as session:  # type: ignore
         result = session.run(query)

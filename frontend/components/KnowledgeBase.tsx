@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { BookOpen, Plus, ArrowLeft, Edit2, Trash2 } from 'lucide-react'
 import CategoryDetail from './CategoryDetail'
 import AddQueryForm from './AddQueryForm'
@@ -43,6 +43,7 @@ export default function KnowledgeBase({ selectedTester }: KnowledgeBaseProps) {
   const [deletingCategory, setDeletingCategory] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const currentTester = selectedTester?.trim() || 'bojan'
+  const formRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     loadCategories()
@@ -53,6 +54,20 @@ export default function KnowledgeBase({ selectedTester }: KnowledgeBaseProps) {
       loadQueries(selectedCategory)
     }
   }, [selectedCategory])
+
+  // Scroll to form when it opens
+  useEffect(() => {
+    if (showAddForm && formRef.current) {
+      // Small delay to ensure form is rendered
+      setTimeout(() => {
+        formRef.current?.scrollIntoView({ 
+          behavior: 'smooth', 
+          block: 'start',
+          inline: 'nearest'
+        })
+      }, 100)
+    }
+  }, [showAddForm])
 
   const loadCategories = async () => {
     try {
@@ -121,8 +136,23 @@ export default function KnowledgeBase({ selectedTester }: KnowledgeBaseProps) {
   }
 
   const handleEditQuery = (query: QueryExample) => {
-    setEditingQuery(query)
-    setShowAddForm(true)
+    console.log('handleEditQuery called with:', query)
+    // Close form first if it's open, then open it with new query
+    // This ensures React re-renders the form with new initial values
+    if (showAddForm) {
+      setShowAddForm(false)
+      setEditingQuery(null)
+      // Use setTimeout to ensure state updates are processed before opening again
+      setTimeout(() => {
+        setEditingQuery(query)
+        setShowAddForm(true)
+        console.log('Form reopened with new query')
+      }, 0)
+    } else {
+      setEditingQuery(query)
+      setShowAddForm(true)
+      console.log('Form opened with query')
+    }
   }
 
   const handleUpdateQuery = async (question: string, cypher: string) => {
@@ -263,7 +293,7 @@ export default function KnowledgeBase({ selectedTester }: KnowledgeBaseProps) {
 
         <div className="flex-1 overflow-y-auto min-h-0">
           {showAddForm && (
-            <div className="mb-6">
+            <div ref={formRef} className="mb-6" key={editingQuery ? `edit-${editingQuery.question}-${editingQuery.cypher}` : 'add-new'}>
               <AddQueryForm
                 onSubmit={editingQuery ? handleUpdateQuery : handleAddQuery}
                 onCancel={() => {

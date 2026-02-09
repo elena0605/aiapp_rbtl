@@ -318,6 +318,21 @@ def get_cached_schema(
     # Always save to cache after fetching (stored in ai/schema/schema.txt)
     save_schema_cache(schema_string)
     
+    # Also update visualization when schema is updated
+    # This happens automatically when UPDATE_NEO4J_SCHEMA=true or force_update=True
+    try:
+        from ai.schema.update_visualization import update_visualization
+        # Silently update visualization (verbose=False to avoid noise during schema updates)
+        update_visualization(database=None, verbose=False)
+    except ImportError:
+        # update_visualization module might not be available in all contexts
+        pass
+    except Exception as e:
+        # Don't fail schema update if visualization update fails
+        # Log warning but continue
+        import sys
+        print(f"Warning: Failed to update visualization during schema update: {e}", file=sys.stderr)
+    
     return schema_string
 
 

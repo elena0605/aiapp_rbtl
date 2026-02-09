@@ -2,6 +2,7 @@
 
 from datetime import datetime
 import json
+import logging
 from typing import Optional, List, Dict, Any, Literal
 from uuid import uuid4
 
@@ -178,28 +179,67 @@ async def chat(request: ChatRequest):
             output_mode=request.output_mode,
         )
 
+        # Set content to error message if there's an error, otherwise use summary
+        error_msg = result.get("error")
+        if error_msg:
+            # Log error for debugging
+            logging.warning(f"Chat API: Error in result: {error_msg}")
+            content = error_msg
+            # Clear summary when there's an error to prevent confusion
+            result["summary"] = None
+        else:
+            content = result.get("summary") or "Query executed successfully"
+        
+        # When there's an error, don't include success-related fields in stored message
         assistant_message = {
             "id": str(uuid4()),
             "role": "assistant",
-            "content": result.get("summary") or "Query executed successfully",
-            "route_type": result.get("route_type"),  # "analytics" or "cypher"
-            "cypher": result.get("cypher"),
-            "tool_name": result.get("tool_name"),  # Analytics tool name
-            "tool_inputs": result.get("tool_inputs"),  # Analytics tool inputs
-            "results": result.get("results"),
-            "summary": result.get("summary"),
-            "examples": result.get("examples_used"),
-            "error": result.get("error"),
+            "content": content,
+            "route_type": None if error_msg else result.get("route_type"),  # Don't store route_type for errors
+            "cypher": result.get("cypher"),  # Keep cypher for debugging
+            "tool_name": None if error_msg else result.get("tool_name"),
+            "tool_inputs": None if error_msg else result.get("tool_inputs"),
+            "results": None if error_msg else result.get("results"),
+            "summary": None if error_msg else result.get("summary"),  # Don't store summary for errors
+            "examples": None if error_msg else result.get("examples_used"),  # Don't store examples for errors
+            "error": error_msg,
             "timestamp": datetime.utcnow(),
             "is_favorite": False,
-            "timings": result.get("timings"),
+            "timings": None if error_msg else result.get("timings"),  # Don't store timings for errors
         }
         history_messages.append(assistant_message)
 
-        result["username"] = username
-        result["message_id"] = assistant_message["id"]
-        return ChatResponse(**result)
+        # Ensure all required fields are present for ChatResponse
+        # When there's an error, don't include success-related fields
+        if error_msg:
+            response_data = {
+                "username": username,
+                "question": request.question,
+                "error": error_msg,
+                "cypher": result.get("cypher"),  # Include for debugging
+                "message_id": assistant_message["id"],
+                # Don't include: route_type, results, summary, examples_used, timings
+            }
+        else:
+            response_data = {
+                "username": username,
+                "question": request.question,
+                "route_type": result.get("route_type"),
+                "cypher": result.get("cypher"),
+                "tool_name": result.get("tool_name"),
+                "tool_inputs": result.get("tool_inputs"),
+                "results": result.get("results"),
+                "summary": result.get("summary"),
+                "examples_used": result.get("examples_used"),
+                "error": None,
+                "timings": result.get("timings"),
+                "message_id": assistant_message["id"],
+            }
+        return ChatResponse(**response_data)
     except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        logging.error(f"Chat API: Exception occurred: {e}\n{error_trace}")
         error_message = {
             "id": str(uuid4()),
             "role": "assistant",
@@ -209,7 +249,13 @@ async def chat(request: ChatRequest):
             "is_favorite": False,
         }
         history_messages.append(error_message)
-        raise HTTPException(status_code=500, detail=str(e))
+        # Return error response instead of raising HTTPException to show error in UI
+        return ChatResponse(
+            username=username,
+            question=request.question,
+            error=str(e),
+            message_id=error_message["id"],
+        )
     finally:
         append_chat_messages(username, history_messages)
 

@@ -20,6 +20,7 @@ if str(ROOT) not in sys.path:
 PROMPTS_DIR = ROOT / "ai" / "prompts"
 
 from utils.neo4j import get_session
+from utils.cypher_validator import validate_cypher, CypherValidationError, ReadOnlyViolationError
 from ai.schema.schema_utils import get_cached_schema, fetch_schema_from_neo4j
 from ai.terminology.loader import load as load_terminology, as_text as terminology_as_text
 from ai.fewshots.vector_store import get_vector_store
@@ -421,7 +422,45 @@ class GraphRAGService:
             "timings": timings,
         }
         
-        # Execute Cypher if requested
+        # Check if query is empty (LLM might have refused to generate write query or semantically invalid query)
+        if not cypher or not cypher.strip():
+            logger.warning("GraphRAG: LLM returned empty Cypher query - may have refused to generate write operation or query references non-existent schema elements")
+            error_message = "Cannot generate query for this request. The question may reference concepts that don't exist in the database schema, or it may require write operations which are not allowed. Only read-only queries that match the schema are supported."
+            result["error"] = error_message
+            result["summary"] = None  # Explicitly set summary to None when there's an error
+            result["cypher"] = None
+            logger.info(f"GraphRAG: Returning error response: {error_message}")
+            return result
+        
+        # Validate query before execution (includes read-only check)
+        # This validation happens even if we don't execute, to catch any write operations
+        logger.info("GraphRAG: validating Cypher query")
+        try:
+            is_valid, validation_details = validate_cypher(cypher, strict=True, enforce_read_only=True)
+            if not is_valid:
+                raise CypherValidationError(
+                    "Cypher query validation failed",
+                    validation_details
+                )
+            logger.info("GraphRAG: Cypher query validation passed")
+        except (CypherValidationError, ReadOnlyViolationError) as ve:
+            logger.error(
+                "GraphRAG: Cypher validation failed: %s (details: %s)",
+                ve,
+                ve.validation_details
+            )
+            error_msg = str(ve)
+            if isinstance(ve, ReadOnlyViolationError):
+                error_msg = f"Read-only violation: {error_msg}"
+            result["error"] = error_msg
+            result["validation_details"] = ve.validation_details
+            result["cypher"] = cypher  # Include the generated query in response for debugging
+            return result
+        except Exception as e:
+            # If validation is unavailable (e.g., CyVer not installed), log warning but continue
+            logger.warning("GraphRAG: Cypher validation skipped: %s", e)
+        
+        # Execute Cypher if requested (validation already done above)
         if execute_cypher and cypher:
             try:
                 logger.info("GraphRAG: executing Cypher against Neo4j")
@@ -457,7 +496,7 @@ class GraphRAGService:
                             summary_prompt = _load_local_prompt("graph.result_summarizer")
                         summary_params = getattr(summary_prompt, "config", None) or {}
                         summary_temp = float(summary_params.get("temperature", 0.0))
-                        summary_max_tokens = int(summary_params.get("max_tokens", 600))
+                        summary_max_tokens = int(summary_params.get("max_tokens", 1200))
                         
                         preview = rows[:10] if isinstance(rows, list) else rows
                         summary_rendered = summary_prompt.compile(

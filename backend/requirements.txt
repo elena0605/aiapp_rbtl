@@ -38,3 +38,9 @@ pydantic>=2.0.0
 # MongoDB
 pymongo>=4.6.0
 
+# Cypher Query Validation
+# NOTE: CyVer is installed from GitLab in Dockerfile, not from PyPI
+# For local development: pip install git+https://gitlab.com/netmode/CyVer.git
+# CyVer requires Python >= 3.10
+# If not installed, read-only validation will still work, but CyVer validation will be skipped
+# CyVer>=2.0.0  # Commented out - installed separately from GitLab
