@@ -103,11 +103,6 @@
       "TikTokHashTag"
     ],
     [
-      "YouTubeVideo",
-      "HAS_TAG",
-      "YoutubeVideoTag"
-    ],
-    [
       "TikTokVideo",
       "HAS_TAG",
       "YoutubeVideoTag"
@@ -118,6 +113,16 @@
       "TikTokHashTag"
     ],
     [
+      "YouTubeVideo",
+      "HAS_TAG",
+      "YoutubeVideoTag"
+    ],
+    [
+      "TikTokUser",
+      "HAS_VIDEO",
+      "YouTubeVideo"
+    ],
+    [
       "YouTubeChannel",
       "HAS_VIDEO",
       "TikTokVideo"
@@ -130,22 +135,17 @@
     [
       "TikTokUser",
       "HAS_VIDEO",
-      "YouTubeVideo"
-    ],
-    [
-      "TikTokUser",
-      "HAS_VIDEO",
       "TikTokVideo"
-    ],
-    [
-      "Influencer",
-      "HAS_ACCOUNT",
-      "TikTokUser"
     ],
     [
       "Influencer",
       "HAS_ACCOUNT",
       "YouTubeChannel"
+    ],
+    [
+      "Influencer",
+      "HAS_ACCOUNT",
+      "TikTokUser"
     ]
   ]
 }

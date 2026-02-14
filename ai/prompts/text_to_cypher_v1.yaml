@@ -13,54 +13,91 @@ variables:
   - name: question
 
 template: |
-  Instructions: 
-  Generate Cypher statement to query a graph database to get the data to answer the user question below.
+Instructions:
+Generate one Cypher statement that answers the user question.
 
-  Graph Database Schema:
-  Use only the provided relationship types and properties in the schema.
-  Do not use any other relationship types or properties that are not provided in the schema.
-  IMPORTANT: If the user's question references concepts (like "company", "organization", etc.) that do not exist in the schema, you MUST return an empty response. Do not generate a query that ignores parts of the question or answers a different question.
-  {{ schema }}
+Graph Database Schema:
+Use only the provided relationship types and properties in the schema.
+Do not use any relationship types or properties that are not provided.
+{{schema}}
 
-  Terminology mapping:
-  This section is helpful to map terminology between the user question and the graph database schema.
-  {{ terminology }}
+Terminology mapping:
+Use terminology to map user wording to schema properties and values.
+{{terminology}}
 
-  Examples:
-  The following examples provide useful patterns for querying the graph database.
-  {{ examples }}
+Examples:
+Use examples as patterns, not strict templates.
+{{examples}}
 
-  Format instructions:
-  Do not include any explanations or apologies in your responses.
-  Do not respond to any questions that might ask anything else than for you to 
-  construct a Cypher statement.
-  Do not include any text except the generated Cypher statement.
-  ONLY RESPOND WITH CYPHER, NO CODEBLOCKS.
-  
-  SEMANTIC CORRECTNESS REQUIREMENTS:
-  - The generated query MUST answer the exact question asked by the user
-  - If the question references concepts (entities, relationships, properties) that don't exist in the schema, return an empty response
-  - Do NOT generate queries that ignore key parts of the question (e.g., if asked about "company" but schema has no Company node, return empty)
-  - The query must semantically match the question's intent, not just be syntactically valid
-  
-  SECURITY RESTRICTION - READ-ONLY QUERIES ONLY:
-  - You MUST ONLY generate READ-ONLY queries (SELECT/MATCH/RETURN operations)
-  - NEVER generate queries with CREATE, SET, DELETE, REMOVE, MERGE, or DETACH DELETE
-  - If the user asks to create, update, delete, or modify data, you MUST return an empty response
-  - Only queries that READ data from the database are allowed
-  - Write operations are strictly forbidden and will be rejected by the system
-  
-  RETURN clause guidelines:
-  - Only return properties that are explicitly mentioned in the user's question
-  - Include properties directly related to the query criteria (e.g., if filtering by age and smoking, return those)
-  - Do NOT include unrelated properties unless the user specifically asks for them
-  - Keep RETURN clauses minimal and focused on what the user requested
-  
-  
-  Important: All Neo4j temporal properties (DateTime, LocalDateTime, Date, Time, Duration) must be converted to strings using toString() before returning them. For example: RETURN toString(tc.create_time) AS create_time
+Output format:
+- Output only Cypher.
+- No explanation, no prose, no markdown, no code fences.
 
-  User question: {{ question }}
+INTERNAL PLANNING WORKFLOW (DO NOT OUTPUT):
+1) Identify intent type:
+   - lookup, prevalence/rate, comparison, association/correlation, ranking, trend.
+2) Normalize wording:
+   - Treat paraphrases as equivalent:
+     prevalence/rate/proportion/percentage
+     associated with/related to/linked to/clustered with
+     higher/lower/more/less
+3) Resolve concepts:
+   - First try direct property mapping.
+   - If abstract concept is used, resolve via terminology.abstract_concepts.indicators.
+   - If multiple concepts are used, include indicators from all relevant concepts.
+4) Build query:
+   - Use read-only Cypher only.
+   - Compute metrics required by the intent.
+5) Self-check:
+   - Uses only allowed schema elements.
+   - Matches question intent.
+   - Safe division and valid array handling.
 
+SECURITY RESTRICTION - READ-ONLY:
+- Generate read-only queries only (MATCH/OPTIONAL MATCH/WITH/WHERE/RETURN/ORDER BY/LIMIT).
+- Never use CREATE, SET, DELETE, REMOVE, MERGE, DETACH DELETE, FOREACH.
+- If request requires write/modification, return empty response.
+
+SEMANTIC CORRECTNESS:
+- Query must answer the exact question.
+- Do not ignore key parts of the question.
+- If concept does not exist in schema/terminology, return empty response.
+
+RETURN RULES:
+- Return minimal fields needed to answer the question.
+- Include fields used for filtering/comparison when needed for interpretation.
+- Convert temporal outputs with toString().
+
+AGGREGATED PERSON ARRAY RULES:
+- All person_* properties are aggregated arrays.
+- Never treat person_* as scalar values.
+- Use exact value strings from terminology (case-sensitive).
+- Prevalence pattern:
+  size(array) AS total_responses
+  size([x IN array WHERE x IN [value1, value2, ...]]) AS relevant_count
+  ROUND(100.0 * relevant_count / total_responses, 2) AS relevant_perc
+- Always protect division:
+  WHERE total_responses > 0
+
+ASSOCIATION / COMPARISON RULES:
+- If question asks association/comparison/correlation or uses phrases like:
+  "associated with", "more likely", "also show", "higher/lower than", "relationship between", "clustered with"
+  then:
+  - compute metrics for each side separately
+  - return both metrics in the same row (same Area or Municipality)
+  - optionally return a difference metric for easier interpretation
+
+ABSTRACT CONCEPTS:
+- For abstract concepts (e.g., well-being, mental health, school safety, physical exercise, unhealthy diet, demographics):
+  - resolve through terminology.abstract_concepts
+  - use only listed indicators
+  - use minimal but sufficient indicator set to answer intent
+
+FAILURE POLICY:
+- Return empty only after failing:
+  direct property mapping -> abstract concept mapping -> paraphrase normalization.
+
+USER QUESTION: {{question}}
 tests:
   - input:
       schema: "(:A)-[:R]->(:B)"

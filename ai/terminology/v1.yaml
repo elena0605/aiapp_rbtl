@@ -324,3 +324,103 @@ properties:
         - "Yes, DID play for money"
         - "Yes, SOMETIMES played for money"
         - "Unknown"
+    abstract_concepts:
+      well-being:
+          description: "Overall subjective well-being of youth"
+          indicators:
+            - person_feels_happy
+            - person_handles_stress_well
+            - person_recovers_quickly
+            - person_future_confidence
+            - person_often_lonely
+            - person_has_mental_health_issues
+            
+
+      mental-health:
+          description: "Psychological resilience and mental state"
+          indicators:
+            - person_has_mental_health_issues
+            - person_handles_stress_well
+            - person_recovers_quickly
+            - person_feels_happy
+
+      loneliness:
+          description: "Frequency of experienced loneliness"
+          indicators:
+            - person_often_lonely
+
+      physical-exercise-activity:
+          description: "Participation in physical exercise or sports"
+          indicators:
+            - person_sports_club
+            - person_sports_leisure
+
+      unhealthy-diet:
+          description: "Low fruit and vegetable consumption"
+          indicators:
+            - person_fruit_days
+            - person_vegetable_days
+
+      school-safety-perception:
+          description: "Perceived safety and crime-related behavior at school"
+          indicators:
+            - person_school_safety
+            - person_school_theft
+            - person_school_drug_dealing
+            - person_school_cannabis
+
+      substance-use-behaviors:
+          description: "Tobacco, vaping, cannabis, alcohol, and other drug use patterns"
+          indicators:
+            - person_smoking_frequency
+            - person_vaping_frequency
+            - person_cannabis_days
+            - person_drunk_lifetime
+            - person_ever_used_laughing_gas
+            - person_ever_used_other_drugs
+
+      peer-influence-substance-use-behaviors:
+          description: "Peer group influence related to substance use behaviors"
+          indicators:
+            - person_friends_alcohol
+            - person_friends_smoking
+            - person_friends_cannabis
+
+      digital-behavior:
+          description: "Screen time, gaming, and online activities including gambling"
+          indicators:
+            - person_gaming_frequency
+            - person_online_gambling
+
+      nutrition-and-beverage-habits:
+          description: "Dietary patterns including meal frequency and beverage consumption"
+          indicators:
+            - person_breakfast_days
+            - person_fruit_days
+            - person_vegetable_days
+            - person_water_days
+            - person_energy_drink_days
+
+      future-outlook-and-optimism:
+          description: "Confidence and optimism about personal future prospects"
+          indicators:
+            - person_future_confidence
+
+      demographic-and-educational-characteristics:
+          description: "Basic demographic characteristics of youth population"
+          indicators:
+            - person_age
+            - person_gender
+            - person_school_year
+            - person_education_type4
+
+      risk-behaviors-and-substance-use:
+          description: "Risk behaviors of youth"
+          indicators:
+            - person_drunk_lifetime
+            - person_smoking_frequency
+            - person_vaping_frequency
+            - person_cannabis_days
+            - person_ever_used_laughing_gas
+            - person_ever_used_other_drugs
+            - person_online_gambling    
