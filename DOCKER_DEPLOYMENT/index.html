@@ -1,0 +1,1600 @@
+<!DOCTYPE html><html lang="en" class="no-js"><head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Documentation for RBTL (Reading Between the Lines) GraphRAG implementation.">
+      
+      
+      
+        <link rel="canonical" href="https://elena0605.github.io/aiapp_rbtl/DOCKER_DEPLOYMENT/">
+      
+      
+        <link rel="prev" href="../architecture/ai-stack/">
+      
+      
+        <link rel="next" href="../operations/azure-deployment/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
+    
+    
+      
+        <title>Docker Deployment - RBTL GraphRAG</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  <link href="../assets/stylesheets/glightbox.min.css" rel="stylesheet"><script src="../assets/javascripts/glightbox.min.js"></script><style id="glightbox-style">
+            html.glightbox-open { overflow: initial; height: 100%; }
+            .gslide-title { margin-top: 0px; user-select: text; }
+            .gslide-desc { color: #666; user-select: text; }
+            .gslide-image img { background: white; }
+            .gscrollbar-fixer { padding-right: 15px; }
+            .gdesc-inner { font-size: 0.75rem; }
+            body[data-md-color-scheme="slate"] .gdesc-inner { background: var(--md-default-bg-color); }
+            body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color); }
+            body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color); }
+        </style></head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#docker-deployment-guide" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="RBTL GraphRAG" class="md-header__button md-logo" aria-label="RBTL GraphRAG" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"></path></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"></path></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            RBTL GraphRAG
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Docker Deployment
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"></path></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"></path></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"></path></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"></path></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/elena0605/aiapp_rbtl" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"></path></svg>
+  </div>
+  <div class="md-source__repository">
+    elena0605/aiapp_rbtl
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation">
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+  
+
+<nav class="md-nav md-nav--primary md-nav--integrated" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="RBTL GraphRAG" class="md-nav__button md-logo" aria-label="RBTL GraphRAG" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"></path></svg>
+
+    </a>
+    RBTL GraphRAG
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/elena0605/aiapp_rbtl" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"></path></svg>
+  </div>
+  <div class="md-source__repository">
+    elena0605/aiapp_rbtl
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3">
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Architecture
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/system-overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/backend/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Backend Services
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/frontend/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Frontend / UI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/ai-stack/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AI &amp; MCP Stack
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operations
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operations
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker Deployment
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Docker Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#quick-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick Start
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Quick Start">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-build-and-run-with-docker-compose" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Build and Run with Docker Compose
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-stop-services" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Stop Services
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#building-individual-images" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Building Individual Images
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Building Individual Images">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#backend-image" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Backend Image
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#frontend-image" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Frontend Image
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#environment-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment Variables
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Environment Variables">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#environment-switching" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment Switching
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Environment Switching">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#switching-between-environments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Switching Between Environments
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#understanding-the-two-concepts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Understanding the Two Concepts
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cloud-deployment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cloud Deployment
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Cloud Deployment">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#push-to-container-registry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Push to Container Registry
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#azure-container-apps" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Azure Container Apps
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#kubernetes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Kubernetes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Troubleshooting">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#backend-wont-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Backend won't start
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#frontend-cant-connect-to-backend" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Frontend can't connect to backend
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#build-fails" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Build fails
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#development-vs-production-docker-modes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Development vs Production Docker Modes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Development vs Production Docker Modes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#development-docker-mode-with-hot-reload" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Development Docker Mode (with Hot Reload)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#production-docker-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Production Docker Mode
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#production-best-practices" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Production Best Practices
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#image-sizes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Image Sizes
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operations/azure-deployment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Azure Production Deployment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operations/deployment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deployment &amp; Environments
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operations/testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing Strategy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../operations/docs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Documentation Ops
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5">
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Surface
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="docker-deployment-guide">Docker Deployment Guide<a class="headerlink" href="#docker-deployment-guide" title="Permanent link">¶</a></h1>
+<p>This guide explains how to build and deploy the RBTL GraphRAG application using Docker.</p>
+<h2 id="architecture">Architecture<a class="headerlink" href="#architecture" title="Permanent link">¶</a></h2>
+<p>The application consists of two Docker containers:</p>
+<ul>
+<li><strong>Backend</strong>: FastAPI application (Python 3.13)</li>
+<li><strong>Frontend</strong>: Next.js application (Node.js 18)</li>
+</ul>
+<h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">¶</a></h2>
+<ul>
+<li>Docker and Docker Compose installed</li>
+<li><code>.env</code> file with all required environment variables</li>
+</ul>
+<h2 id="quick-start">Quick Start<a class="headerlink" href="#quick-start" title="Permanent link">¶</a></h2>
+<h3 id="1-build-and-run-with-docker-compose">1. Build and Run with Docker Compose<a class="headerlink" href="#1-build-and-run-with-docker-compose" title="Permanent link">¶</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># Build and start all services</span>
+docker-compose<span class="w"> </span>up<span class="w"> </span>--build
+
+<span class="c1"># Or run in detached mode</span>
+docker-compose<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--build
+</code></pre></div>
+<p>The application will be available at:
+- Frontend: http://localhost:3003 (port 3003 to avoid conflicts)
+- Backend API: http://localhost:8001 (port 8001 to avoid conflicts)
+- API Docs: http://localhost:8001/docs</p>
+<p><strong>Note:</strong> Ports are mapped to avoid conflicts with:
+- Local development (backend: 8000, frontend: 3002)
+- Langfuse (3001)</p>
+<h3 id="2-stop-services">2. Stop Services<a class="headerlink" href="#2-stop-services" title="Permanent link">¶</a></h3>
+<div class="highlight"><pre><span></span><code>docker-compose<span class="w"> </span>down
+</code></pre></div>
+<h2 id="building-individual-images">Building Individual Images<a class="headerlink" href="#building-individual-images" title="Permanent link">¶</a></h2>
+<h3 id="backend-image">Backend Image<a class="headerlink" href="#backend-image" title="Permanent link">¶</a></h3>
+<div class="highlight"><pre><span></span><code>docker<span class="w"> </span>build<span class="w"> </span>-f<span class="w"> </span>backend/Dockerfile<span class="w"> </span>-t<span class="w"> </span>rbtl-graphrag-backend:latest<span class="w"> </span>.
+</code></pre></div>
+<h3 id="frontend-image">Frontend Image<a class="headerlink" href="#frontend-image" title="Permanent link">¶</a></h3>
+<div class="highlight"><pre><span></span><code>docker<span class="w"> </span>build<span class="w"> </span>-f<span class="w"> </span>frontend/Dockerfile<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--build-arg<span class="w"> </span><span class="nv">NEXT_PUBLIC_API_URL</span><span class="o">=</span>http://localhost:8000<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-t<span class="w"> </span>rbtl-graphrag-frontend:latest<span class="w"> </span>.
+</code></pre></div>
+<h2 id="environment-variables">Environment Variables<a class="headerlink" href="#environment-variables" title="Permanent link">¶</a></h2>
+<p>Create a <code>.env</code> file in the project root with:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Environment Selection</span>
+<span class="nv">ENVIRONMENT</span><span class="o">=</span>production<span class="w">  </span><span class="c1"># Set to "development" for local development</span>
+
+<span class="c1"># Neo4j (Production)</span>
+<span class="nv">NEO4J_URI</span><span class="o">=</span>bolt+s://your-db-id.databases.neo4j.io
+<span class="nv">NEO4J_USER</span><span class="o">=</span>neo4j
+<span class="nv">NEO4J_PASSWORD</span><span class="o">=</span>your-password
+<span class="nv">NEO4J_DATABASE</span><span class="o">=</span>neo4j
+
+<span class="c1"># Neo4j (Development - Optional)</span>
+<span class="c1"># When ENVIRONMENT=development, these will be used instead</span>
+<span class="c1"># For Docker: use host.docker.internal instead of localhost/127.0.0.1</span>
+<span class="c1"># NEO4J_URI_DEV=bolt://host.docker.internal:7687</span>
+<span class="c1"># NEO4J_USER_DEV=neo4j</span>
+<span class="c1"># NEO4J_PASSWORD_DEV=local-password</span>
+<span class="c1"># NEO4J_DATABASE_DEV=neo4j</span>
+
+<span class="c1"># OpenAI</span>
+<span class="nv">OPENAI_API_KEY</span><span class="o">=</span>sk-proj-...
+<span class="nv">OPENAI_MODEL</span><span class="o">=</span>gpt-4o
+
+<span class="c1"># Langfuse (Production)</span>
+<span class="nv">LANGFUSE_HOST</span><span class="o">=</span>https://cloud.langfuse.com
+<span class="nv">LANGFUSE_PUBLIC_KEY</span><span class="o">=</span>pk-lf-...
+<span class="nv">LANGFUSE_SECRET_KEY</span><span class="o">=</span>sk-lf-...
+<span class="nv">PROMPT_LABEL</span><span class="o">=</span>production
+
+<span class="c1"># Langfuse (Development - Optional)</span>
+<span class="c1"># When ENVIRONMENT=development, these will be used instead</span>
+<span class="c1"># LANGFUSE_HOST_DEV=http://localhost:3001</span>
+<span class="c1"># LANGFUSE_PUBLIC_KEY_DEV=pk-lf-dev-...</span>
+<span class="c1"># LANGFUSE_SECRET_KEY_DEV=sk-lf-dev-...</span>
+
+<span class="c1"># MongoDB (Production)</span>
+<span class="nv">MONGODB_URI</span><span class="o">=</span>mongodb+srv://username:password@cluster.mongodb.net/?retryWrites<span class="o">=</span>true<span class="p">&amp;</span><span class="nv">w</span><span class="o">=</span>majority
+<span class="nv">MONGODB_DB</span><span class="o">=</span>rbl
+<span class="c1"># Alternative: MONGODB_DATABASE=rbl (both work)</span>
+
+<span class="c1"># MongoDB (Development - Optional)</span>
+<span class="c1"># When ENVIRONMENT=development, these will be used instead</span>
+<span class="c1"># For Docker: use host.docker.internal instead of localhost</span>
+<span class="c1"># MONGODB_URI_DEV=mongodb://airflow:tiktok@host.docker.internal:27017</span>
+<span class="c1"># MONGODB_DB_DEV=social_media</span>
+<span class="c1"># Alternative: MONGODB_DATABASE_DEV=social_media (both work)</span>
+
+<span class="c1"># Frontend</span>
+<span class="nv">NEXT_PUBLIC_API_URL</span><span class="o">=</span>http://localhost:8000
+
+<span class="c1"># Optional</span>
+<span class="nv">ENABLE_ANALYTICS_AGENT</span><span class="o">=</span><span class="nb">false</span>
+</code></pre></div>
+<h3 id="environment-switching">Environment Switching<a class="headerlink" href="#environment-switching" title="Permanent link">¶</a></h3>
+<p>The application supports switching between <strong>development</strong> and <strong>production</strong> environments using the <code>ENVIRONMENT</code> variable in your <code>.env</code> file.</p>
+<p><strong>How it works:</strong>
+- Set <code>ENVIRONMENT=development</code> to use local databases and services
+- Set <code>ENVIRONMENT=production</code> (or omit it) to use production credentials
+- <code>_DEV</code> suffixed variables are optional - if not set, the app falls back to production values</p>
+<p><strong>Example: Local Development Setup</strong>
+</p><div class="highlight"><pre><span></span><code><span class="nv">ENVIRONMENT</span><span class="o">=</span>development
+
+<span class="c1"># Production (for reference, won't be used)</span>
+<span class="nv">NEO4J_URI</span><span class="o">=</span>neo4j+s://prod-db.databases.neo4j.io
+<span class="nv">MONGODB_URI</span><span class="o">=</span>mongodb+srv://prod-cluster...
+
+<span class="c1"># Development (will be used)</span>
+<span class="c1"># Note: Use host.docker.internal for Docker containers to access host services</span>
+<span class="nv">NEO4J_URI_DEV</span><span class="o">=</span>bolt://host.docker.internal:7687
+<span class="nv">NEO4J_USER_DEV</span><span class="o">=</span>neo4j
+<span class="nv">NEO4J_PASSWORD_DEV</span><span class="o">=</span>local-password
+<span class="nv">NEO4J_DATABASE_DEV</span><span class="o">=</span>neo4j
+<span class="nv">MONGODB_URI_DEV</span><span class="o">=</span>mongodb://airflow:tiktok@host.docker.internal:27017
+<span class="nv">MONGODB_DB_DEV</span><span class="o">=</span>social_media
+<span class="nv">LANGFUSE_HOST_DEV</span><span class="o">=</span>http://host.docker.internal:3000
+</code></pre></div><p></p>
+<p><strong>Docker Compose automatically passes all environment variables</strong> from your <code>.env</code> file to the containers, so environment switching works seamlessly with Docker.</p>
+<h4 id="switching-between-environments">Switching Between Environments<a class="headerlink" href="#switching-between-environments" title="Permanent link">¶</a></h4>
+<p>To switch from one environment to another, follow these steps:</p>
+<p><strong>Step 1: Update <code>.env</code> file</strong></p>
+<p>Edit your <code>.env</code> file and change the <code>ENVIRONMENT</code> variable:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># To switch to development</span>
+<span class="nv">ENVIRONMENT</span><span class="o">=</span>development
+
+<span class="c1"># To switch to production</span>
+<span class="nv">ENVIRONMENT</span><span class="o">=</span>production
+</code></pre></div>
+<p><strong>Step 2: Restart the backend container</strong></p>
+<p>After changing <code>ENVIRONMENT</code>, restart the backend container to load the new environment:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Simple restart (works if container is already running)</span>
+docker-compose<span class="w"> </span>restart<span class="w"> </span>backend
+</code></pre></div>
+<p><strong>Or, if you want to ensure all environment variables are reloaded:</strong></p>
+<div class="highlight"><pre><span></span><code><span class="c1"># For production mode</span>
+docker-compose<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--force-recreate<span class="w"> </span>backend<span class="w"> </span>frontend
+
+<span class="c1"># For development mode</span>
+docker-compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.yml<span class="w"> </span>-f<span class="w"> </span>docker-compose.dev.yml<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--force-recreate<span class="w"> </span>backend<span class="w"> </span>frontend
+</code></pre></div>
+<p><strong>Note:</strong> You don't need to stop containers first. The <code>--force-recreate</code> flag will recreate the container with the new environment variables.</p>
+<p><strong>Alternative: Full restart (if simple restart doesn't work)</strong></p>
+<p>If you need to fully stop and recreate:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># If you started with production mode (docker-compose up)</span>
+docker-compose<span class="w"> </span>down
+docker-compose<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--force-recreate
+
+<span class="c1"># If you started with development mode (docker-compose -f docker-compose.yml -f docker-compose.dev.yml up)</span>
+docker-compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.yml<span class="w"> </span>-f<span class="w"> </span>docker-compose.dev.yml<span class="w"> </span>down
+docker-compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.yml<span class="w"> </span>-f<span class="w"> </span>docker-compose.dev.yml<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--force-recreate
+</code></pre></div>
+<p><strong>Step 3: Verify the switch</strong></p>
+<p>Check that containers are using the correct environment:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Check backend logs to see which environment is active</span>
+docker-compose<span class="w"> </span>logs<span class="w"> </span>backend<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-i<span class="w"> </span>environment
+
+<span class="c1"># Or check environment variables in the container</span>
+docker-compose<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>backend<span class="w"> </span>env<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>ENVIRONMENT
+</code></pre></div>
+<p><strong>Quick Reference: Switching Commands</strong></p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Switch to Development</span>
+<span class="c1"># 1. Edit .env: ENVIRONMENT=development</span>
+<span class="c1"># 2. Run (simplest method):</span>
+docker-compose<span class="w"> </span>restart<span class="w"> </span>backend
+
+<span class="c1"># Or with force recreate (ensures env vars are reloaded):</span>
+docker-compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.yml<span class="w"> </span>-f<span class="w"> </span>docker-compose.dev.yml<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--force-recreate<span class="w"> </span>backend<span class="w"> </span>frontend
+
+<span class="c1"># Switch to Production</span>
+<span class="c1"># 1. Edit .env: ENVIRONMENT=production</span>
+<span class="c1"># 2. Run (simplest method):</span>
+docker-compose<span class="w"> </span>restart<span class="w"> </span>backend
+
+<span class="c1"># Or with force recreate (ensures env vars are reloaded):</span>
+docker-compose<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--force-recreate<span class="w"> </span>backend
+</code></pre></div>
+<h4 id="understanding-the-two-concepts">Understanding the Two Concepts<a class="headerlink" href="#understanding-the-two-concepts" title="Permanent link">¶</a></h4>
+<p>There are <strong>two independent concepts</strong> that can be mixed and matched:</p>
+<p><strong>1. <code>ENVIRONMENT</code> variable (in <code>.env</code> file)</strong>
+- Controls <strong>which databases/credentials</strong> to use
+- <code>ENVIRONMENT=development</code> → uses <code>NEO4J_URI_DEV</code>, <code>MONGODB_URI_DEV</code>, <code>LANGFUSE_HOST_DEV</code>
+- <code>ENVIRONMENT=production</code> → uses <code>NEO4J_URI</code>, <code>MONGODB_URI</code>, <code>LANGFUSE_HOST</code></p>
+<p><strong>2. Docker Compose files</strong>
+- Controls <strong>how the code runs</strong> (hot-reload, volume mounts, build mode)
+- <code>docker-compose.yml</code> → Production Docker mode (no hot-reload, code baked into image)
+- <code>docker-compose.yml + docker-compose.dev.yml</code> → Development Docker mode (hot-reload, volume mounts)</p>
+<p><strong>Important:</strong> Both modes can run <strong>locally on your machine</strong> or <strong>on remote servers</strong>. The difference is not about location, but about:
+- <strong>Production Docker mode</strong>: Optimized for deployment (code baked in, no hot-reload, smaller images)
+- <strong>Development Docker mode</strong>: Optimized for active coding (hot-reload, volume mounts, easier debugging)</p>
+<p><strong>The Difference Between the Two Commands:</strong></p>
+<p></p><div class="highlight"><pre><span></span><code><span class="c1"># Command 1: Production Docker mode</span>
+docker-compose<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--force-recreate
+</code></pre></div>
+- Uses only <code>docker-compose.yml</code>
+- Code is <strong>baked into the Docker image</strong> (no volume mounts)
+- <strong>No hot-reload</strong> - changes require rebuild
+- Backend runs: <code>uvicorn</code> (production command)
+- Frontend runs: Next.js production build
+- <strong>BUT</strong> still respects <code>ENVIRONMENT</code> variable for database selection<p></p>
+<p></p><div class="highlight"><pre><span></span><code><span class="c1"># Command 2: Development Docker mode</span>
+docker-compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.yml<span class="w"> </span>-f<span class="w"> </span>docker-compose.dev.yml<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>--force-recreate<span class="w"> </span>backend<span class="w"> </span>frontend
+</code></pre></div>
+- Uses both <code>docker-compose.yml</code> + <code>docker-compose.dev.yml</code> (dev overrides)
+- Code is <strong>mounted as volumes</strong> (live code from your filesystem)
+- <strong>Hot-reload enabled</strong> - changes reflect immediately
+- Backend runs: <code>uvicorn --reload</code> (auto-reloads on file changes)
+- Frontend runs: <code>npm run dev</code> (Next.js dev server)
+- <strong>ALSO</strong> respects <code>ENVIRONMENT</code> variable for database selection<p></p>
+<p><strong>Possible Combinations:</strong></p>
+<table>
+<thead>
+<tr>
+<th>ENVIRONMENT</th>
+<th>Docker Mode</th>
+<th>What Happens</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>development</code></td>
+<td>Production (<code>docker-compose up</code>)</td>
+<td>Uses dev databases, but no hot-reload</td>
+</tr>
+<tr>
+<td><code>development</code></td>
+<td>Development (<code>docker-compose -f ... -f docker-compose.dev.yml up</code>)</td>
+<td>Uses dev databases + hot-reload</td>
+</tr>
+<tr>
+<td><code>production</code></td>
+<td>Production (<code>docker-compose up</code>)</td>
+<td>Uses prod databases, no hot-reload</td>
+</tr>
+<tr>
+<td><code>production</code></td>
+<td>Development (<code>docker-compose -f ... -f docker-compose.dev.yml up</code>)</td>
+<td>Uses prod databases + hot-reload (unusual)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Most Common Use Cases:</strong></p>
+<ul>
+<li><strong>Local development with hot-reload</strong>: <code>ENVIRONMENT=development</code> + dev Docker mode</li>
+<li><strong>Testing against production databases</strong>: <code>ENVIRONMENT=production</code> + dev Docker mode</li>
+<li><strong>Production deployment</strong>: <code>ENVIRONMENT=production</code> + production Docker mode</li>
+</ul>
+<p><strong>Important Notes:</strong>
+- ✅ <strong><code>docker-compose restart backend</code></strong> is the simplest method and usually works
+- ✅ <strong><code>--force-recreate</code></strong> ensures environment variables are fully reloaded (use if restart doesn't work)
+- ✅ Containers will automatically reconnect to the correct databases based on the <code>ENVIRONMENT</code> variable
+- ✅ No code changes needed - just update <code>.env</code> and restart/recreate the container
+- ✅ <strong>Database names switch automatically:</strong>
+  - Development: Neo4j uses <code>neo4j</code> database, MongoDB uses <code>social_media</code> database
+  - Production: Both Neo4j and MongoDB use <code>rbl</code> database</p>
+<h2 id="cloud-deployment">Cloud Deployment<a class="headerlink" href="#cloud-deployment" title="Permanent link">¶</a></h2>
+<h3 id="push-to-container-registry">Push to Container Registry<a class="headerlink" href="#push-to-container-registry" title="Permanent link">¶</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># Tag images</span>
+docker<span class="w"> </span>tag<span class="w"> </span>rbtl-graphrag-backend:latest<span class="w"> </span>your-registry/rbtl-graphrag-backend:latest
+docker<span class="w"> </span>tag<span class="w"> </span>rbtl-graphrag-frontend:latest<span class="w"> </span>your-registry/rbtl-graphrag-frontend:latest
+
+<span class="c1"># Push to registry</span>
+docker<span class="w"> </span>push<span class="w"> </span>your-registry/rbtl-graphrag-backend:latest
+docker<span class="w"> </span>push<span class="w"> </span>your-registry/rbtl-graphrag-frontend:latest
+</code></pre></div>
+<h3 id="azure-container-apps">Azure Container Apps<a class="headerlink" href="#azure-container-apps" title="Permanent link">¶</a></h3>
+<p>The images can be deployed to Azure Container Apps as described in the <a href="../operations/azure-deployment/">Azure Deployment Guide</a>.</p>
+<h3 id="kubernetes">Kubernetes<a class="headerlink" href="#kubernetes" title="Permanent link">¶</a></h3>
+<p>Example deployment manifests:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># backend-deployment.yaml</span>
+<span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">apps/v1</span>
+<span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Deployment</span>
+<span class="nt">metadata</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">rbtl-graphrag-backend</span>
+<span class="nt">spec</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">replicas</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2</span>
+<span class="w">  </span><span class="nt">selector</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">matchLabels</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">app</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">rbtl-graphrag-backend</span>
+<span class="w">  </span><span class="nt">template</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">metadata</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">labels</span><span class="p">:</span>
+<span class="w">        </span><span class="nt">app</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">rbtl-graphrag-backend</span>
+<span class="w">    </span><span class="nt">spec</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">containers</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">backend</span>
+<span class="w">        </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">your-registry/rbtl-graphrag-backend:latest</span>
+<span class="w">        </span><span class="nt">ports</span><span class="p">:</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">containerPort</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">8000</span>
+<span class="w">        </span><span class="nt">envFrom</span><span class="p">:</span>
+<span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">secretRef</span><span class="p">:</span>
+<span class="w">            </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">rbtl-graphrag-secrets</span>
+</code></pre></div>
+<h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">¶</a></h2>
+<h3 id="backend-wont-start">Backend won't start<a class="headerlink" href="#backend-wont-start" title="Permanent link">¶</a></h3>
+<ul>
+<li>Check environment variables are set correctly</li>
+<li>Verify Neo4j connection: <code>docker-compose logs backend</code></li>
+<li>Check health endpoint: <code>curl http://localhost:8000/api/health</code></li>
+</ul>
+<h3 id="frontend-cant-connect-to-backend">Frontend can't connect to backend<a class="headerlink" href="#frontend-cant-connect-to-backend" title="Permanent link">¶</a></h3>
+<ul>
+<li>Verify <code>NEXT_PUBLIC_API_URL</code> is set correctly</li>
+<li>Check CORS settings in backend</li>
+<li>Ensure backend container is running: <code>docker-compose ps</code></li>
+</ul>
+<h3 id="build-fails">Build fails<a class="headerlink" href="#build-fails" title="Permanent link">¶</a></h3>
+<ul>
+<li>Clear Docker cache: <code>docker-compose build --no-cache</code></li>
+<li>Check Dockerfile paths are correct</li>
+<li>Verify all required files exist</li>
+</ul>
+<h2 id="development-vs-production-docker-modes">Development vs Production Docker Modes<a class="headerlink" href="#development-vs-production-docker-modes" title="Permanent link">¶</a></h2>
+<p><strong>Important Clarification:</strong> Both "Development Docker mode" and "Production Docker mode" can run <strong>locally on your machine</strong> or <strong>on remote servers</strong>. The difference is about <strong>how the code runs</strong>, not <strong>where it runs</strong>:</p>
+<ul>
+<li><strong>Production Docker mode</strong> = Optimized for deployment (code baked into image, no hot-reload, smaller/faster)</li>
+<li><strong>Development Docker mode</strong> = Optimized for active coding (hot-reload, volume mounts, easier debugging)</li>
+</ul>
+<h3 id="development-docker-mode-with-hot-reload">Development Docker Mode (with Hot Reload)<a class="headerlink" href="#development-docker-mode-with-hot-reload" title="Permanent link">¶</a></h3>
+<p>For active development with automatic code reloading:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Set ENVIRONMENT=development in .env file first</span>
+<span class="c1"># Then start with development overrides (hot-reload enabled)</span>
+docker-compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.yml<span class="w"> </span>-f<span class="w"> </span>docker-compose.dev.yml<span class="w"> </span>up<span class="w"> </span>--build
+</code></pre></div>
+<p><strong>Features:</strong>
+- ✅ Backend auto-reloads on Python file changes (via <code>--reload</code> flag)
+- ✅ Frontend hot-reloads on React/TypeScript changes
+- ✅ Source code mounted as volumes (no rebuild needed for code changes)
+- ✅ Code changes reflect immediately without restarting containers
+- ⚠️ Still need to rebuild if you change <code>requirements.txt</code> or <code>package.json</code>
+- ⚠️ Larger container size (includes dev dependencies)
+- ⚠️ Slower startup (runs dev servers)</p>
+<p><strong>When to use:</strong>
+- Active coding and debugging
+- Testing code changes quickly
+- Local development (but can also run on remote servers)</p>
+<p><strong>Environment Configuration:</strong>
+Make sure your <code>.env</code> file has:
+</p><div class="highlight"><pre><span></span><code><span class="nv">ENVIRONMENT</span><span class="o">=</span>development
+<span class="nv">NEO4J_URI_DEV</span><span class="o">=</span>bolt://host.docker.internal:7687
+<span class="nv">NEO4J_USER_DEV</span><span class="o">=</span>neo4j
+<span class="nv">NEO4J_PASSWORD_DEV</span><span class="o">=</span>local-password
+<span class="nv">NEO4J_DATABASE_DEV</span><span class="o">=</span>neo4j
+<span class="nv">MONGODB_URI_DEV</span><span class="o">=</span>mongodb://airflow:tiktok@host.docker.internal:27017
+<span class="nv">MONGODB_DB_DEV</span><span class="o">=</span>social_media
+<span class="nv">LANGFUSE_HOST_DEV</span><span class="o">=</span>http://host.docker.internal:3000
+<span class="c1"># ... other _DEV variables</span>
+</code></pre></div><p></p>
+<h3 id="production-docker-mode">Production Docker Mode<a class="headerlink" href="#production-docker-mode" title="Permanent link">¶</a></h3>
+<p>For optimized, production-ready containers:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Set ENVIRONMENT=production in .env file (or omit it)</span>
+<span class="c1"># Then start standard production build</span>
+docker-compose<span class="w"> </span>up<span class="w"> </span>--build
+</code></pre></div>
+<p><strong>Features:</strong>
+- ✅ Code baked into image (no volume mounts)
+- ✅ Optimized builds (smaller images, faster startup)
+- ✅ Production-ready configuration
+- ✅ No dev dependencies in final image
+- ⚠️ Code changes require rebuild (no hot-reload)
+- ⚠️ Must rebuild image to see code changes</p>
+<p><strong>When to use:</strong>
+- Production deployments
+- Testing production-like environment locally
+- CI/CD pipelines
+- When you want optimized, stable containers</p>
+<p><strong>Environment Configuration:</strong>
+Make sure your <code>.env</code> file has:
+</p><div class="highlight"><pre><span></span><code><span class="nv">ENVIRONMENT</span><span class="o">=</span>production<span class="w">  </span><span class="c1"># or omit this line</span>
+<span class="nv">NEO4J_URI</span><span class="o">=</span>bolt+s://prod-db.databases.neo4j.io
+<span class="nv">NEO4J_USER</span><span class="o">=</span>neo4j
+<span class="nv">NEO4J_PASSWORD</span><span class="o">=</span>your-password
+<span class="nv">NEO4J_DATABASE</span><span class="o">=</span>neo4j
+<span class="nv">MONGODB_URI</span><span class="o">=</span>mongodb+srv://prod-cluster...
+<span class="nv">MONGODB_DB</span><span class="o">=</span>rbl
+<span class="c1"># ... production variables</span>
+</code></pre></div><p></p>
+<p><strong>Summary:</strong>
+- Both modes can run <strong>locally</strong> or on <strong>remote servers</strong>
+- Development mode = easier coding (hot-reload)
+- Production mode = optimized deployment (no hot-reload, smaller images)
+- The <code>ENVIRONMENT</code> variable (development/production) is separate and controls which databases to use</p>
+<h3 id="production-best-practices">Production Best Practices<a class="headerlink" href="#production-best-practices" title="Permanent link">¶</a></h3>
+<ul>
+<li>Use multi-stage builds (already configured)</li>
+<li>Set <code>NODE_ENV=production</code></li>
+<li>Use production-ready base images</li>
+<li>Configure proper health checks</li>
+<li>Set up logging and monitoring</li>
+</ul>
+<h2 id="image-sizes">Image Sizes<a class="headerlink" href="#image-sizes" title="Permanent link">¶</a></h2>
+<p>Expected image sizes:
+- Backend: ~500-800 MB
+- Frontend: ~200-400 MB</p>
+<p>To reduce size:
+- Use <code>.dockerignore</code> (already configured)
+- Multi-stage builds (already configured)
+- Alpine base images (frontend uses alpine)</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/elena0605/aiapp_rbtl" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"></path></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.instant", "navigation.sections", "content.code.copy", "toc.integrate", "search.highlight"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  
+<script id="init-glightbox">const lightbox = GLightbox({"touchNavigation": true, "loop": false, "zoomable": true, "draggable": true, "openEffect": "zoom", "closeEffect": "zoom", "slideEffect": "slide"});
+document$.subscribe(()=>{ lightbox.reload(); });
+</script></body></html>
