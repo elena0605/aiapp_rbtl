@@ -6,13 +6,14 @@ import logging
 from typing import Optional, List, Dict, Any, Literal
 from uuid import uuid4
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException  # pyright: ignore[reportMissingImports]
 from pydantic import BaseModel
 
 from backend.app.services.chat_sessions import (
     append_chat_messages,
     ensure_allowed_username,
     fetch_chat_history,
+    fetch_recent_messages,
     list_test_users,
     delete_chat_message,
     set_message_favorite,
@@ -68,13 +69,17 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     username: str
     question: str
-    route_type: Optional[str] = None  # "analytics" or "cypher"
+    route_type: Optional[str] = None  # "analytics", "cypher", "visualization", "off_topic", "chitchat", "guardrail"
+    intent: Optional[str] = None
+    intent_confidence: Optional[float] = None
+    rewritten_question: Optional[str] = None
     cypher: Optional[str] = None
-    tool_name: Optional[str] = None  # For analytics results
-    tool_inputs: Optional[Dict[str, Any]] = None  # For analytics results
+    tool_name: Optional[str] = None
+    tool_inputs: Optional[Dict[str, Any]] = None
     results: Optional[List[Dict[str, Any]]] = None
     summary: Optional[str] = None
     examples_used: Optional[List[Dict[str, Any]]] = None
+    visualization: Optional[Dict[str, Any]] = None  # Chart spec for frontend rendering
     error: Optional[str] = None
     timings: Optional[Dict[str, float]] = None
     message_id: Optional[str] = None
@@ -162,6 +167,9 @@ async def chat(request: ChatRequest):
     except ValueError as exc:
         raise HTTPException(status_code=403, detail=str(exc))
 
+    # Fetch recent conversation history for intent routing context
+    recent_history = fetch_recent_messages(username, n=10)
+
     history_messages: List[Dict[str, Any]] = [
         {
             "id": str(uuid4()),
@@ -177,60 +185,60 @@ async def chat(request: ChatRequest):
             question=request.question,
             execute_cypher=request.execute_cypher,
             output_mode=request.output_mode,
+            conversation_history=recent_history,
         )
 
-        # Set content to error message if there's an error, otherwise use summary
         error_msg = result.get("error")
         if error_msg:
-            # Log error for debugging
             logging.warning(f"Chat API: Error in result: {error_msg}")
             content = error_msg
-            # Clear summary when there's an error to prevent confusion
             result["summary"] = None
         else:
             content = result.get("summary") or "Query executed successfully"
-        
-        # When there's an error, don't include success-related fields in stored message
+
         assistant_message = {
             "id": str(uuid4()),
             "role": "assistant",
             "content": content,
-            "route_type": None if error_msg else result.get("route_type"),  # Don't store route_type for errors
-            "cypher": result.get("cypher"),  # Keep cypher for debugging
+            "route_type": None if error_msg else result.get("route_type"),
+            "cypher": result.get("cypher"),
             "tool_name": None if error_msg else result.get("tool_name"),
             "tool_inputs": None if error_msg else result.get("tool_inputs"),
             "results": None if error_msg else result.get("results"),
-            "summary": None if error_msg else result.get("summary"),  # Don't store summary for errors
-            "examples": None if error_msg else result.get("examples_used"),  # Don't store examples for errors
+            "summary": None if error_msg else result.get("summary"),
+            "examples": None if error_msg else result.get("examples_used"),
             "error": error_msg,
             "timestamp": datetime.utcnow(),
             "is_favorite": False,
-            "timings": None if error_msg else result.get("timings"),  # Don't store timings for errors
+            "timings": None if error_msg else result.get("timings"),
         }
         history_messages.append(assistant_message)
 
-        # Ensure all required fields are present for ChatResponse
-        # When there's an error, don't include success-related fields
         if error_msg:
             response_data = {
                 "username": username,
                 "question": request.question,
                 "error": error_msg,
-                "cypher": result.get("cypher"),  # Include for debugging
+                "cypher": result.get("cypher"),
+                "intent": result.get("intent"),
+                "intent_confidence": result.get("intent_confidence"),
                 "message_id": assistant_message["id"],
-                # Don't include: route_type, results, summary, examples_used, timings
             }
         else:
             response_data = {
                 "username": username,
                 "question": request.question,
                 "route_type": result.get("route_type"),
+                "intent": result.get("intent"),
+                "intent_confidence": result.get("intent_confidence"),
+                "rewritten_question": result.get("rewritten_question"),
                 "cypher": result.get("cypher"),
                 "tool_name": result.get("tool_name"),
                 "tool_inputs": result.get("tool_inputs"),
                 "results": result.get("results"),
                 "summary": result.get("summary"),
                 "examples_used": result.get("examples_used"),
+                "visualization": result.get("visualization"),
                 "error": None,
                 "timings": result.get("timings"),
                 "message_id": assistant_message["id"],
@@ -285,10 +293,12 @@ async def chat_stream(websocket: WebSocket):
                 continue
 
             try:
-                ensure_allowed_username(username)
+                normalized_ws_user = ensure_allowed_username(username)
             except ValueError as exc:
                 await websocket.send_json({"type": "error", "message": str(exc)})
                 continue
+
+            recent_history = fetch_recent_messages(normalized_ws_user, n=10)
 
             await websocket.send_json(
                 {"type": "status", "message": "Processing question..."}
@@ -298,6 +308,7 @@ async def chat_stream(websocket: WebSocket):
                 question=question,
                 execute_cypher=message.get("execute_cypher", True),
                 output_mode=message.get("output_mode", "chat"),
+                conversation_history=recent_history,
             ):
                 await websocket.send_json(chunk)
 

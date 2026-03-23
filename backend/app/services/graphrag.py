@@ -1,13 +1,13 @@
-"""GraphRAG service - wraps existing text_to_cypher logic."""
+"""GraphRAG service - wraps existing text_to_cypher logic with intent routing."""
 
 import asyncio
 import os
 import sys
+from functools import lru_cache, partial
 from pathlib import Path
 from typing import Dict, Any, List, Optional, AsyncIterator
 import json
 import re
-from functools import lru_cache
 import logging
 import time
 
@@ -45,13 +45,59 @@ except Exception as e:
     _temp_logger = logging.getLogger("GraphRAGService")
     _temp_logger.warning(f"Graph analytics agent import failed (non-ImportError): {e}")
 
+# Optional: Intent router
+try:
+    from ai.agent.intent_router import IntentRouter, IntentResult
+    INTENT_ROUTER_AVAILABLE = True
+except ImportError as e:
+    INTENT_ROUTER_AVAILABLE = False
+    IntentRouter = None  # type: ignore[misc, assignment]
+    IntentResult = None  # type: ignore[misc, assignment]
+    import logging
+    _temp_logger2 = logging.getLogger("GraphRAGService")
+    _temp_logger2.warning(f"Intent router import failed: {e}")
+except Exception as e:
+    INTENT_ROUTER_AVAILABLE = False
+    IntentRouter = None  # type: ignore[misc, assignment]
+    IntentResult = None  # type: ignore[misc, assignment]
+    import logging
+    _temp_logger2 = logging.getLogger("GraphRAGService")
+    _temp_logger2.warning(f"Intent router import failed (non-ImportError): {e}")
+
+# Optional: Visualization agent
+try:
+    from ai.agent.visualization_agent import VisualizationAgent, VisualizationSpec
+    VISUALIZATION_AVAILABLE = True
+except Exception as e:
+    VISUALIZATION_AVAILABLE = False
+    VisualizationAgent = None  # type: ignore[misc, assignment]
+    VisualizationSpec = None  # type: ignore[misc, assignment]
+
+# Guardrails (lightweight — should always be available)
+try:
+    from ai.agent import guardrails as guardrails_module
+    GUARDRAILS_AVAILABLE = True
+except Exception:
+    GUARDRAILS_AVAILABLE = False
+    guardrails_module = None  # type: ignore[assignment]
+
 logger = logging.getLogger("GraphRAGService")
 
-# Log analytics availability on module load
+# Log availability on module load
 if ANALYTICS_AVAILABLE:
     logger.info("Graph analytics agent is available")
 else:
     logger.warning("Graph analytics agent is NOT available (import failed)")
+
+if INTENT_ROUTER_AVAILABLE:
+    logger.info("Intent router is available")
+else:
+    logger.warning("Intent router is NOT available (import failed)")
+
+if VISUALIZATION_AVAILABLE:
+    logger.info("Visualization agent is available")
+else:
+    logger.warning("Visualization agent is NOT available")
 
 
 _PROMPT_VAR_PATTERN = re.compile(r"{{\s*(\w+)\s*}}")
@@ -146,6 +192,9 @@ class GraphRAGService:
         self._prompt = None
         self._params = None
         self._analytics_agent = None
+        self._intent_router = None
+        self._visualization_agent = None
+        self._discussion_prompt = None
     
     def _get_schema(self) -> str:
         """Get Neo4j schema (cached)."""
@@ -191,101 +240,509 @@ class GraphRAGService:
         if not ANALYTICS_AVAILABLE:
             return None
         if self._analytics_agent is None:
-            # Initialize with LLM selector enabled
-            # The agent's LLM will decide if a tool is appropriate
             self._analytics_agent = GraphAnalyticsAgent(use_llm_selector=True)
         return self._analytics_agent
-    
+
+    def _get_intent_router(self):
+        """Get or create intent router (lazy initialization)."""
+        if not INTENT_ROUTER_AVAILABLE:
+            return None
+        if self._intent_router is None:
+            try:
+                self._intent_router = IntentRouter()
+            except Exception as e:
+                logger.warning("Failed to initialize IntentRouter: %s", e)
+                return None
+        return self._intent_router
+
+    def _get_visualization_agent(self):
+        """Get or create visualization agent (lazy initialization)."""
+        if not VISUALIZATION_AVAILABLE:
+            return None
+        if self._visualization_agent is None:
+            try:
+                self._visualization_agent = VisualizationAgent()
+            except Exception as e:
+                logger.warning("Failed to initialize VisualizationAgent: %s", e)
+                return None
+        return self._visualization_agent
+
+    def _get_discussion_prompt(self):
+        """Load discussion prompt (Langfuse with local YAML fallback)."""
+        if self._discussion_prompt is not None:
+            return self._discussion_prompt
+
+        prompt_label = os.environ.get("PROMPT_LABEL")
+        try:
+            self._discussion_prompt = get_prompt_from_langfuse(
+                "graph.discussion",
+                langfuse_client=None,
+                label=prompt_label,
+            )
+        except Exception as err:
+            logger.warning(
+                "Langfuse prompt fetch for discussion failed (%s). "
+                "Using local YAML fallback.",
+                err,
+            )
+            self._discussion_prompt = self._load_local_prompt("graph.discussion")
+        return self._discussion_prompt
+
+    def _load_local_prompt(self, prompt_id: str):
+        """Load a prompt from local YAML files by id."""
+        import re as _re
+
+        _PROMPT_VAR_PATTERN = _re.compile(r"{{\s*(\w+)\s*}}")
+
+        for path in PROMPTS_DIR.glob("*.yaml"):
+            try:
+                with path.open("r", encoding="utf-8") as fh:
+                    data = yaml.safe_load(fh) or {}
+            except Exception as exc:
+                logger.debug("Skipping unparseable YAML file %s: %s", path, exc)
+                continue
+            if not isinstance(data, dict):
+                continue
+            if data.get("id") != prompt_id:
+                continue
+            template = data.get("template")
+            if not template:
+                logger.warning("Prompt file '%s' has no template.", path)
+                return None
+            params = data.get("params") or {}
+
+            class _LocalPrompt:
+                def __init__(self, tmpl, cfg):
+                    self._template = tmpl
+                    self.config = cfg
+
+                def compile(self, **kwargs):
+                    def _sub(m):
+                        val = kwargs.get(m.group(1), "")
+                        if val is None:
+                            return ""
+                        if isinstance(val, (dict, list)):
+                            import json as _json
+                            return _json.dumps(val, ensure_ascii=False)
+                        return str(val)
+                    return _PROMPT_VAR_PATTERN.sub(_sub, self._template)
+
+            return _LocalPrompt(template, params)
+
+        logger.warning("Prompt '%s' not found in local YAML files.", prompt_id)
+        return None
+
     async def process_question(
         self,
         question: str,
         execute_cypher: bool = True,
         output_mode: str = "chat",
-        try_analytics_first: Optional[bool] = None,
+        conversation_history: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
-        """Process a question and return Cypher query with optional results.
-        
-        Routing logic:
-        1. If try_analytics_first=True, attempt analytics agent first
-        2. Analytics agent uses LLM to select appropriate tool
-        3. If analytics agent finds a tool, use it
-        4. Otherwise, fall back to text-to-Cypher
-        
+        """Process a question with intent-based routing.
+
+        Routing pipeline:
+        1. Classify intent (graph_query / analytics / off_topic / chitchat /
+           follow_up).  Follow-ups are rewritten into self-contained questions.
+        2. Route to the appropriate handler based on classified intent.
+        3. Fall back to text-to-Cypher when the intent router is
+           unavailable or fails.
+
         Args:
-            question: User's natural language question
-            execute_cypher: Whether to execute the generated Cypher
-            output_mode: "json", "chat", or "both"
-            try_analytics_first: If None, uses ENABLE_ANALYTICS_AGENT env var (default: False)
-        
+            question: User's natural language question.
+            execute_cypher: Whether to execute the generated Cypher.
+            output_mode: "json", "chat", or "both".
+            conversation_history: Recent messages for context (list of dicts
+                with ``role`` and ``content``).
+
         Returns:
-            Dictionary with question, cypher (or tool_name), results, summary, examples_used
+            Dictionary with question, cypher (or tool_name), results,
+            summary, examples_used, and routing metadata.
         """
-        # Determine if analytics should be tried
-        # Default to False (disabled) unless explicitly enabled via env var
-        if try_analytics_first is None:
-            try_analytics_first = os.environ.get("ENABLE_ANALYTICS_AGENT", "false").lower() in {"1", "true", "yes"}
-        
-        # Try analytics first if enabled
-        if try_analytics_first and ANALYTICS_AVAILABLE:
-            logger.info("GraphRAG: Attempting analytics agent first...")
-            agent = self._get_analytics_agent()
-            if agent:
-                try:
-                    logger.info("GraphRAG: Analytics agent available, running question through it...")
-                    # Analytics agent uses LLM to select tool
-                    # If it finds a tool, it will execute it
-                    # If no tool is appropriate, it raises GraphAnalyticsAgentError
-                    analytics_result = await agent.run(question)
-                    logger.info(f"GraphRAG: Analytics agent succeeded with tool: {analytics_result.tool_name}")
-                    
-                    # Analytics succeeded - return analytics result
-                    # Convert Neo4j temporal types in analytics results
-                    converted_results = _convert_neo4j_temporal_to_string(analytics_result.raw_result)
-                    return {
-                        "question": question,
-                        "route_type": "analytics",  # Indicate this used analytics
-                        "tool_name": analytics_result.tool_name,
-                        "tool_inputs": analytics_result.inputs,
-                        "results": converted_results,
-                        "summary": analytics_result.summary,
-                        "examples_used": None,
-                        "cypher": None,  # No Cypher for analytics
-                        "error": None,
-                        "timings": {},  # Could add timing if needed
-                    }
-                except GraphAnalyticsAgentError as e:
-                    # Analytics agent couldn't find appropriate tool
-                    # Fall through to Cypher
-                    logger.info(f"GraphRAG: Analytics agent found no suitable tool: {e}, falling back to Cypher")
-                    pass
-                except Exception as e:
-                    # Analytics failed for other reason - log and fall back
-                    logger.warning(f"GraphRAG: Analytics agent error: {e}, falling back to Cypher", exc_info=True)
-                    pass
-            else:
-                logger.info("GraphRAG: Analytics agent not available, skipping analytics route")
-        else:
-            if not ANALYTICS_AVAILABLE:
-                logger.debug("GraphRAG: Analytics not available (import failed), using Cypher only")
-            if not try_analytics_first:
-                logger.debug("GraphRAG: try_analytics_first=False, using Cypher only")
-        
-        # Fall back to text-to-Cypher (existing behavior)
+        history = conversation_history or []
+
+        # ── Guardrails (cheap, runs first) ───────────────────────────
+        if GUARDRAILS_AVAILABLE:
+            guard_result = guardrails_module.check(question)
+            if not guard_result.passed:
+                logger.info(
+                    "GraphRAG: guardrail blocked question (category=%s)",
+                    guard_result.category,
+                )
+                return {
+                    "question": question,
+                    "route_type": "guardrail",
+                    "intent": "blocked",
+                    "cypher": None,
+                    "results": None,
+                    "summary": guard_result.reason,
+                    "examples_used": None,
+                    "error": None,
+                    "timings": {},
+                }
+
+        # ── Intent routing (when available) ──────────────────────────
+        use_intent_routing = os.environ.get(
+            "ENABLE_INTENT_ROUTER", "true"
+        ).lower() in {"1", "true", "yes"}
+
+        router = self._get_intent_router() if use_intent_routing else None
+
+        if router is not None:
+            try:
+                intent_result = await router.classify(question, history)
+                logger.info(
+                    "GraphRAG: intent=%s confidence=%.2f is_follow_up=%s effective_q=%r",
+                    intent_result.intent,
+                    intent_result.confidence,
+                    intent_result.is_follow_up,
+                    intent_result.effective_question,
+                )
+
+                effective_q = intent_result.effective_question
+
+                # ── Off-topic ────────────────────────────────────────
+                if intent_result.intent == "off_topic":
+                    return self._handle_off_topic(question, intent_result)
+
+                # ── Chitchat ─────────────────────────────────────────
+                if intent_result.intent == "chitchat":
+                    return self._handle_chitchat(question, intent_result, history)
+
+                # ── Discussion ──────────────────────────────────────
+                if intent_result.intent == "discussion":
+                    return await self._handle_discussion(
+                        effective_q, intent_result, history,
+                    )
+
+                # ── Analytics ────────────────────────────────────────
+                if intent_result.intent == "analytics":
+                    if ANALYTICS_AVAILABLE:
+                        analytics_result = await self._handle_analytics(effective_q)
+                        if analytics_result is not None:
+                            analytics_result["intent"] = intent_result.intent
+                            analytics_result["intent_confidence"] = intent_result.confidence
+                            return analytics_result
+                        logger.info(
+                            "GraphRAG: analytics agent returned no result, "
+                            "falling back to Cypher"
+                        )
+                    else:
+                        logger.warning(
+                            "GraphRAG: intent classified as analytics but "
+                            "analytics agent is not available; falling back to Cypher"
+                        )
+
+                # ── Visualization ─────────────────────────────────────
+                if intent_result.intent == "visualization":
+                    viz_result = await self._handle_visualization(
+                        effective_q, execute_cypher, output_mode, history,
+                    )
+                    if viz_result is not None:
+                        viz_result["intent"] = intent_result.intent
+                        viz_result["intent_confidence"] = intent_result.confidence
+                        if intent_result.rewritten_question:
+                            viz_result["original_question"] = question
+                            viz_result["rewritten_question"] = (
+                                intent_result.rewritten_question
+                            )
+                        return viz_result
+                    logger.info(
+                        "GraphRAG: visualization handler returned None, "
+                        "falling back to Cypher"
+                    )
+
+                # ── Graph query (and follow-up after rewrite) ────────
+                loop = asyncio.get_event_loop()
+                result = await loop.run_in_executor(
+                    None,
+                    partial(
+                        self._process_question_sync,
+                        effective_q,
+                        execute_cypher,
+                        output_mode,
+                        conversation_history=history,
+                    ),
+                )
+                result["intent"] = intent_result.intent
+                result["intent_confidence"] = intent_result.confidence
+                if intent_result.rewritten_question:
+                    result["original_question"] = question
+                    result["rewritten_question"] = intent_result.rewritten_question
+                return result
+
+            except Exception as e:
+                logger.warning(
+                    "GraphRAG: intent routing failed (%s), falling through "
+                    "to direct Cypher generation",
+                    e,
+                    exc_info=True,
+                )
+
+        # ── Fallback: direct text-to-Cypher (no intent routing) ──────
+        logger.info("GraphRAG: using direct Cypher generation (no intent routing)")
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
             None,
-            self._process_question_sync,
-            question,
-            execute_cypher,
-            output_mode,
+            partial(
+                self._process_question_sync,
+                question,
+                execute_cypher,
+                output_mode,
+                conversation_history=history,
+            ),
         )
         return result
-    
+
+    # ── Route handlers ───────────────────────────────────────────────
+
+    async def _handle_analytics(self, question: str) -> Optional[Dict[str, Any]]:
+        """Try the analytics agent; return *None* when no tool matches."""
+        agent = self._get_analytics_agent()
+        if agent is None:
+            return None
+        try:
+            logger.info("GraphRAG: running analytics agent for %r", question)
+            analytics_result = await agent.run(question)
+            logger.info(
+                "GraphRAG: analytics agent succeeded (tool=%s)",
+                analytics_result.tool_name,
+            )
+            converted_results = _convert_neo4j_temporal_to_string(
+                analytics_result.raw_result
+            )
+            return {
+                "question": question,
+                "route_type": "analytics",
+                "tool_name": analytics_result.tool_name,
+                "tool_inputs": analytics_result.inputs,
+                "results": converted_results,
+                "summary": analytics_result.summary,
+                "examples_used": None,
+                "cypher": None,
+                "error": None,
+                "timings": {},
+            }
+        except GraphAnalyticsAgentError as e:
+            logger.info("GraphRAG: analytics agent found no tool: %s", e)
+            return None
+        except Exception as e:
+            logger.warning("GraphRAG: analytics agent error: %s", e, exc_info=True)
+            return None
+
+    async def _handle_visualization(
+        self,
+        question: str,
+        execute_cypher: bool,
+        output_mode: str,
+        history: List[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        """Run text-to-cypher, then generate a visualization spec from results.
+
+        Returns ``None`` if visualization processing fails so the caller can
+        fall back to a plain graph_query.
+        """
+        viz_agent = self._get_visualization_agent()
+        if viz_agent is None:
+            logger.warning("GraphRAG: visualization agent not available")
+            return None
+
+        # Step 1: generate Cypher and get results (reuse the sync pipeline)
+        loop = asyncio.get_event_loop()
+        cypher_result = await loop.run_in_executor(
+            None,
+            partial(
+                self._process_question_sync,
+                question,
+                execute_cypher,
+                "both",  # need raw results for viz
+                conversation_history=history,
+            ),
+        )
+
+        if cypher_result.get("error"):
+            return cypher_result
+
+        results = cypher_result.get("results") or []
+        cypher = cypher_result.get("cypher") or ""
+
+        if not results:
+            cypher_result["route_type"] = "visualization"
+            cypher_result["visualization"] = {
+                "chart_type": "table",
+                "title": "No Data",
+                "description": "The query returned no results to visualize.",
+                "data": {"columns": [], "rows": []},
+                "summary": "No results found.",
+            }
+            return cypher_result
+
+        # Step 2: generate the visualization spec via LLM
+        try:
+            viz_spec = viz_agent.generate_spec(question, cypher, results)
+            cypher_result["route_type"] = "visualization"
+            cypher_result["visualization"] = {
+                "chart_type": viz_spec.chart_type,
+                "title": viz_spec.title,
+                "description": viz_spec.description,
+                "data": viz_spec.data,
+                "axes": viz_spec.axes,
+                "summary": viz_spec.summary,
+            }
+            # Use the viz summary as the chat summary if present
+            if viz_spec.summary:
+                cypher_result["summary"] = viz_spec.summary
+            return cypher_result
+        except Exception as e:
+            logger.warning(
+                "GraphRAG: visualization generation failed: %s", e, exc_info=True
+            )
+            return None
+
+    @staticmethod
+    def _handle_off_topic(
+        question: str, intent_result: Any
+    ) -> Dict[str, Any]:
+        """Return a polite refusal for off-topic questions."""
+        return {
+            "question": question,
+            "route_type": "off_topic",
+            "intent": "off_topic",
+            "intent_confidence": intent_result.confidence,
+            "cypher": None,
+            "results": None,
+            "summary": (
+                "I'm sorry, but that question falls outside the scope of this "
+                "knowledge base. I can help you explore youth health data, "
+                "social media influencer analytics, and geographic/demographic "
+                "information for areas in the Netherlands. "
+                "Feel free to ask me something related to these topics!"
+            ),
+            "examples_used": None,
+            "error": None,
+            "timings": {},
+        }
+
+    @staticmethod
+    def _handle_chitchat(
+        question: str,
+        intent_result: Any,
+        history: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Return a friendly conversational response for greetings etc."""
+        q_lower = question.strip().lower().rstrip("!.")
+
+        if any(g in q_lower for g in ("hi", "hello", "hey", "good morning", "good afternoon")):
+            reply = (
+                "Hello! I'm your knowledge graph assistant. You can ask me "
+                "about youth health survey data, social media influencers, "
+                "or geographic demographics in the Netherlands. "
+                "What would you like to explore?"
+            )
+        elif any(t in q_lower for t in ("thank", "thanks", "thx")):
+            reply = "You're welcome! Let me know if you have more questions."
+        elif any(b in q_lower for b in ("bye", "goodbye", "see you")):
+            reply = "Goodbye! Feel free to come back anytime."
+        else:
+            reply = (
+                "I'm here to help you explore the knowledge graph. "
+                "Ask me a question about the data and I'll do my best!"
+            )
+
+        return {
+            "question": question,
+            "route_type": "chitchat",
+            "intent": "chitchat",
+            "intent_confidence": intent_result.confidence,
+            "cypher": None,
+            "results": None,
+            "summary": reply,
+            "examples_used": None,
+            "error": None,
+            "timings": {},
+        }
+
+    async def _handle_discussion(
+        self,
+        question: str,
+        intent_result: Any,
+        history: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Use the LLM to reason about prior results or give data analysis advice."""
+        start = time.perf_counter()
+
+        prompt_obj = self._get_discussion_prompt()
+        if prompt_obj is None:
+            return {
+                "question": question,
+                "route_type": "discussion",
+                "intent": "discussion",
+                "intent_confidence": intent_result.confidence,
+                "cypher": None,
+                "results": None,
+                "summary": (
+                    "I'd like to help discuss the data, but the discussion "
+                    "prompt is not configured. Please try asking a data question instead."
+                ),
+                "examples_used": None,
+                "error": None,
+                "timings": {},
+            }
+
+        from ai.agent.intent_router import IntentRouter, DOMAIN_DESCRIPTION
+
+        history_text = IntentRouter.format_history_with_budget(
+            history, max_chars=4000, recent_full=6,
+        )
+
+        rendered = prompt_obj.compile(
+            domain_description=DOMAIN_DESCRIPTION,
+            conversation_history=history_text,
+            question=question,
+        )
+
+        loop = asyncio.get_event_loop()
+        model = os.environ.get("OPENAI_MODEL") or os.environ.get("OPEN_AI_MODEL", "gpt-4o")
+        try:
+            reply = await loop.run_in_executor(
+                None,
+                partial(
+                    create_completion,
+                    rendered,
+                    model=model,
+                    temperature=0.3,
+                    max_tokens=800,
+                ),
+            )
+        except Exception as exc:
+            logger.warning("Discussion LLM call failed: %s", exc)
+            reply = (
+                "I encountered an error while reasoning about the data. "
+                "Please try rephrasing your question or ask a new data query."
+            )
+
+        elapsed = time.perf_counter() - start
+        logger.info("GraphRAG: discussion response generated in %.2fs", elapsed)
+
+        return {
+            "question": question,
+            "route_type": "discussion",
+            "intent": "discussion",
+            "intent_confidence": intent_result.confidence,
+            "cypher": None,
+            "results": None,
+            "summary": reply.strip() if reply else "I couldn't generate a response.",
+            "examples_used": None,
+            "error": None,
+            "timings": {"discussion_llm": round(elapsed, 3)},
+        }
+
     def _process_question_sync(
         self,
         question: str,
         execute_cypher: bool,
         output_mode: str,
+        conversation_history: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """Synchronous processing (runs in thread pool)."""
         start_time = time.perf_counter()
@@ -369,12 +826,26 @@ class GraphRAGService:
             logger.info("GraphRAG: loaded fallback static examples")
         elif not include_examples:
             logger.info("GraphRAG: proceeding without few-shot examples")
-        
-        # Compile prompt
+
+        # Build conversation context for the Cypher prompt
+        conversation_context = "(no prior conversation)"
+        if conversation_history and INTENT_ROUTER_AVAILABLE:
+            try:
+                conversation_context = IntentRouter.format_history_for_cypher(
+                    conversation_history, max_pairs=3
+                )
+            except Exception as e:
+                logger.warning("GraphRAG: failed to format history for cypher: %s", e)
+
+        # Compile prompt (includes conversation_context; the template treats
+        # it as optional — if the variable is missing from the template the
+        # _LocalPrompt.compile silently drops it, so this is backwards-compatible
+        # with v1 of the prompt that doesn't have {{conversation_context}}).
         rendered = prompt.compile(
             schema=schema_string,
             terminology=terminology_str,
             examples=examples_str,
+            conversation_context=conversation_context,
             question=question,
         )
         
@@ -538,42 +1009,57 @@ class GraphRAGService:
         question: str,
         execute_cypher: bool = True,
         output_mode: str = "chat",
+        conversation_history: Optional[List[Dict[str, Any]]] = None,
     ) -> AsyncIterator[Dict[str, Any]]:
         """Process a question with streaming responses.
         
         Yields:
             Dictionary chunks with type and data
         """
-        # Send status updates
-        yield {"type": "status", "message": "Finding similar examples..."}
-        
-        # Process question (non-streaming for now, can be enhanced)
-        result = await self.process_question(question, execute_cypher, output_mode)
-        
-        # Stream results back
+        yield {"type": "status", "message": "Classifying intent..."}
+
+        result = await self.process_question(
+            question,
+            execute_cypher,
+            output_mode,
+            conversation_history=conversation_history,
+        )
+
+        # Emit intent info if available
+        if result.get("intent"):
+            yield {
+                "type": "intent",
+                "data": {
+                    "intent": result["intent"],
+                    "confidence": result.get("intent_confidence"),
+                    "rewritten_question": result.get("rewritten_question"),
+                },
+            }
+
         if result.get("examples_used"):
             yield {
                 "type": "examples",
                 "data": result["examples_used"],
             }
-        
-        yield {
-            "type": "cypher",
-            "data": result["cypher"],
-        }
-        
+
+        if result.get("cypher"):
+            yield {
+                "type": "cypher",
+                "data": result["cypher"],
+            }
+
         if result.get("results"):
             yield {
                 "type": "results",
                 "data": result["results"],
             }
-        
+
         if result.get("summary"):
             yield {
                 "type": "summary",
                 "data": result["summary"],
             }
-        
+
         if result.get("error"):
             yield {
                 "type": "error",

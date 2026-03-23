@@ -11,19 +11,21 @@ import {
   ChatResponse,
   ChatHistoryResponse,
   ChatMessageRecord,
+  VisualizationData,
 } from '@/lib/api'
 
 export interface Message {
   id: string
   role: 'user' | 'assistant'
   content: string
-  route_type?: 'analytics' | 'cypher'  // Which route was taken
+  route_type?: string
   cypher?: string
-  tool_name?: string  // Analytics tool name
-  tool_inputs?: Record<string, any>  // Analytics tool inputs
+  tool_name?: string
+  tool_inputs?: Record<string, any>
   results?: any[]
   summary?: string
   examples?: any[]
+  visualization?: VisualizationData
   error?: string
   timestamp: Date
   isFavorite?: boolean
@@ -72,7 +74,7 @@ export default function ChatInterface({
   const [historyError, setHistoryError] = useState<string | null>(null)
   const [favoriteUpdatingId, setFavoriteUpdatingId] = useState<string | null>(null)
   const [processingStepIndex, setProcessingStepIndex] = useState<number | null>(null)
-  const [routeType, setRouteType] = useState<'analytics' | 'cypher' | null>(null)
+  const [routeType, setRouteType] = useState<string | null>(null)
   const [selectedTool, setSelectedTool] = useState<string | null>(null)
   const [stepDurations, setStepDurations] = useState<number[]>(
     () => PROCESS_STEPS_CYPHER.map(() => 0)
@@ -221,20 +223,21 @@ export default function ChatInterface({
 
 
   const transformMessageRecord = (record: ChatMessageRecord): Message => {
-    // If there's an error, don't include success-related fields even if they exist in the record
     const hasError = !!(record.error && record.error.trim())
     return {
       id: record.id || `${record.timestamp}-${record.role}`,
       role: record.role,
       content: record.content,
+      route_type: hasError ? undefined : record.route_type,
       cypher: record.cypher,
       results: hasError ? undefined : record.results,
       summary: hasError ? undefined : record.summary,
       examples: hasError ? undefined : record.examples,
+      visualization: hasError ? undefined : record.visualization,
       error: record.error,
       timestamp: new Date(record.timestamp),
       isFavorite: record.is_favorite,
-      timings: hasError ? undefined : (record as any).timings, // Don't show timings for errors
+      timings: hasError ? undefined : (record as any).timings,
     }
   }
 
@@ -330,18 +333,19 @@ export default function ChatInterface({
       const assistantMessage: Message = {
         id: response.message_id || (Date.now() + 1).toString(),
         role: 'assistant',
-        content: content,  // This is already set to error message if hasError is true
-        route_type: hasError ? undefined : response.route_type,  // Don't show route type for errors
+        content: content,
+        route_type: hasError ? undefined : response.route_type,
         tool_name: hasError ? undefined : response.tool_name,
         tool_inputs: hasError ? undefined : response.tool_inputs,
-        cypher: response.cypher,  // Keep cypher for debugging even on error
-        results: hasError ? undefined : response.results,  // Don't show results for errors
-        summary: undefined,  // Never show summary when there's an error - content already has the error
-        examples: hasError ? undefined : response.examples_used,  // Don't show examples for errors
+        cypher: response.cypher,
+        results: hasError ? undefined : response.results,
+        summary: undefined,
+        examples: hasError ? undefined : response.examples_used,
+        visualization: hasError ? undefined : response.visualization,
         error: response.error,
         timestamp: new Date(),
         isFavorite: false,
-        timings: hasError ? undefined : response.timings,  // Don't show timings for errors
+        timings: hasError ? undefined : response.timings,
       }
       
       // Log the final message to debug
@@ -452,7 +456,14 @@ export default function ChatInterface({
             </div>
             {routeType && (
               <div className="text-xs text-gray-500 border-b border-gray-200 pb-2">
-                Route: <span className="font-semibold">{routeType === 'analytics' ? 'Graph Analytics' : 'Cypher Query'}</span>
+                Route: <span className="font-semibold">{
+                  routeType === 'analytics' ? 'Graph Analytics'
+                    : routeType === 'visualization' ? 'Visualization'
+                    : routeType === 'discussion' ? 'Discussion'
+                    : routeType === 'chitchat' ? 'Chitchat'
+                    : routeType === 'off_topic' ? 'Off Topic'
+                    : 'Cypher Query'
+                }</span>
                 {selectedTool && (
                   <span className="ml-2">
                     | Tool: <span className="font-semibold">{selectedTool}</span>

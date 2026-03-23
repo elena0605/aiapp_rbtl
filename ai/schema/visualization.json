@@ -88,17 +88,17 @@
       "TikTokComment"
     ],
     [
-      "YouTubeVideo",
-      "HAS_COMMENT",
-      "YouTubeComment"
-    ],
-    [
       "TikTokVideo",
       "HAS_COMMENT",
       "TikTokComment"
     ],
     [
       "TikTokVideo",
+      "HAS_COMMENT",
+      "YouTubeComment"
+    ],
+    [
+      "YouTubeVideo",
       "HAS_COMMENT",
       "YouTubeComment"
     ],
@@ -133,14 +133,9 @@
       "YouTubeComment"
     ],
     [
-      "YouTubeVideo",
-      "HAS_TAG",
-      "TikTokHashTag"
-    ],
-    [
       "TikTokVideo",
       "HAS_TAG",
-      "TikTokHashTag"
+      "YoutubeVideoTag"
     ],
     [
       "YouTubeVideo",
@@ -150,10 +145,15 @@
     [
       "TikTokVideo",
       "HAS_TAG",
-      "YoutubeVideoTag"
+      "TikTokHashTag"
     ],
     [
-      "TikTokUser",
+      "YouTubeVideo",
+      "HAS_TAG",
+      "TikTokHashTag"
+    ],
+    [
+      "YouTubeChannel",
       "HAS_VIDEO",
       "TikTokVideo"
     ],
@@ -163,7 +163,7 @@
       "YouTubeVideo"
     ],
     [
-      "YouTubeChannel",
+      "TikTokUser",
       "HAS_VIDEO",
       "TikTokVideo"
     ],

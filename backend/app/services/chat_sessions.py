@@ -46,6 +46,18 @@ def fetch_chat_history(username: str) -> Dict[str, Any]:
     return document
 
 
+def fetch_recent_messages(username: str, n: int = 10) -> List[Dict[str, Any]]:
+    """Return the last *n* messages for a user (most-recent-last order).
+
+    Used to inject conversation context into intent classification and
+    query generation prompts.  Returns an empty list when the user has
+    no history yet.
+    """
+    history = fetch_chat_history(username)
+    messages = history.get("messages", [])
+    return messages[-n:] if messages else []
+
+
 def append_chat_messages(username: str, messages: List[Dict[str, Any]]) -> None:
     """Append messages to the user's chat history."""
     if not messages:

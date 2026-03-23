@@ -2,13 +2,25 @@ import axios from 'axios'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
+export interface VisualizationData {
+  chart_type: 'bar' | 'horizontal_bar' | 'pie' | 'line' | 'table' | 'number'
+  title: string
+  description?: string
+  data: any
+  axes?: { x?: string | null; y?: string | null }
+  summary?: string
+}
+
 export interface ChatResponse {
   username: string
   question: string
-  route_type?: 'analytics' | 'cypher'  // Which route was taken
+  route_type?: string
+  intent?: string
+  intent_confidence?: number
+  rewritten_question?: string
   cypher?: string
-  tool_name?: string  // Analytics tool name (if route_type === 'analytics')
-  tool_inputs?: Record<string, any>  // Analytics tool inputs
+  tool_name?: string
+  tool_inputs?: Record<string, any>
   results?: any[]
   summary?: string
   examples_used?: Array<{
@@ -16,6 +28,7 @@ export interface ChatResponse {
     cypher: string
     similarity?: number
   }>
+  visualization?: VisualizationData
   error?: string
   timings?: Record<string, number>
   message_id?: string
@@ -25,13 +38,14 @@ export interface ChatMessageRecord {
   id: string
   role: 'user' | 'assistant'
   content: string
-  route_type?: 'analytics' | 'cypher'  // Which route was taken
+  route_type?: string
   cypher?: string
-  tool_name?: string  // Analytics tool name
-  tool_inputs?: Record<string, any>  // Analytics tool inputs
+  tool_name?: string
+  tool_inputs?: Record<string, any>
   results?: any[]
   summary?: string
   examples?: any[]
+  visualization?: VisualizationData
   error?: string
   timestamp: string
   is_favorite?: boolean

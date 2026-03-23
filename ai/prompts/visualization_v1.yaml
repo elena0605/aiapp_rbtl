@@ -1,0 +1,72 @@
+id: graph.visualization
+version: 1
+description: Determine the best chart type and structure data for frontend visualization.
+tags: [graph, visualization, chart]
+params:
+  temperature: 0.0
+  max_tokens: 800
+
+variables:
+  - name: question
+    description: The user question that produced the data
+  - name: cypher
+    description: The Cypher query that was executed
+  - name: results
+    description: JSON string of query results (up to 20 rows)
+  - name: result_count
+    description: Total number of result rows
+
+template: |
+  You are a data visualization specialist. Given query results, recommend the best chart type and structure the data for rendering.
+
+  User question: {{question}}
+
+  Cypher query: {{cypher}}
+
+  Query results ({{result_count}} total rows, showing up to 20):
+  {{results}}
+
+  Analyze the data and respond with a JSON visualization specification:
+
+  1. Choose the most appropriate chart_type:
+     - "bar": For comparing quantities across categories (e.g., counts by area, frequencies)
+     - "horizontal_bar": For many categories with long labels
+     - "pie": For showing proportions of a whole (max 8 slices)
+     - "line": For trends over time or ordered sequences
+     - "table": When data is best shown as-is (complex multi-column data, or when no chart adds value)
+     - "number": For single aggregate values (counts, averages)
+
+  2. Structure the data for the chosen chart type.
+
+  Respond STRICTLY with JSON:
+  {
+    "chart_type": "<bar|horizontal_bar|pie|line|table|number>",
+    "title": "<concise chart title>",
+    "description": "<one sentence explaining what the chart shows>",
+    "data": {
+      "labels": ["label1", "label2", ...],
+      "datasets": [
+        {
+          "label": "<dataset name>",
+          "data": [value1, value2, ...]
+        }
+      ]
+    },
+    "axes": {
+      "x": "<x-axis label or null>",
+      "y": "<y-axis label or null>"
+    },
+    "summary": "<text summary of key insights from the data>"
+  }
+
+  Rules:
+  - For "number" type, use: {"value": <number>, "label": "<what it represents>"} instead of labels/datasets.
+  - For "table" type, use: {"columns": ["col1", ...], "rows": [[val1, val2, ...], ...]} instead of labels/datasets.
+  - Keep labels concise (truncate to 25 chars if needed).
+  - For pie charts, group small slices (<3%) into "Other".
+  - Always include a text summary of key findings.
+  - If the data cannot be meaningfully visualized, use "table" type.
+
+metadata:
+  owner: ai-team
+  created_at: 2025-11-15

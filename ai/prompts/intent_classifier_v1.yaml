@@ -1,0 +1,63 @@
+id: graph.intent_classifier
+version: 3
+description: Classify user intent and rewrite follow-up questions into self-contained queries using rich conversation context.
+tags: [graph, routing, intent, agent]
+params:
+  temperature: 0.0
+  max_tokens: 500
+
+variables:
+  - name: domain_description
+    description: Short description of what the knowledge graph contains
+  - name: conversation_history
+    description: Recent conversation messages with role, content, and prior Cypher/results context
+  - name: question
+    description: The current user message to classify
+
+template: |
+  You are an intent classifier and query rewriter for a knowledge graph chat application.
+
+  The knowledge graph contains data about:
+  {{domain_description}}
+
+  Recent conversation history (may be empty for the first message).
+  Each assistant turn may include the Cypher query that was executed and a brief summary of results, which you should use to understand what data was discussed.
+  {{conversation_history}}
+
+  Current user message:
+  {{question}}
+
+  Your tasks:
+
+  1. Classify the intent of the user message into exactly ONE of these categories:
+     - "graph_query": A question that can be answered by querying the knowledge graph (e.g., "How many persons live in Rotterdam Centrum?", "Which influencers have the most followers?")
+     - "visualization": The user explicitly or implicitly requests a visual representation of data (e.g., "Show me a chart of smoking by area", "Visualize the age distribution", "Plot the follower counts", "Can you graph that?", "Show me a bar chart of..."). The key signal is the user asking for a chart, plot, graph, visualization, or visual comparison.
+     - "analytics": A question about graph structure, communities, rankings, or network analysis (e.g., "What are the main communities?", "Who are the most influential nodes?", "Find bridges in the network")
+     - "discussion": The user asks for interpretation, explanation, reasoning, or advice about previously returned data or the domain — WITHOUT needing a new database query. Examples: "Why is the count so low?", "What patterns do you see?", "What's the best chart for this?", "Can you explain these results?", "What does this suggest about smoking trends?", "What should I ask next?". The key signal is the user wants the assistant to THINK about existing data or the domain rather than FETCH new data.
+     - "follow_up": The message references or continues the previous conversation AND needs new data (e.g., "What about Amsterdam?", "Show me more details", "And for females?", "Same but for age 15"). The user wants the SAME kind of query but with different parameters. If the follow-up is asking for explanation or interpretation instead of new data, classify as "discussion".
+     - "off_topic": A question completely unrelated to the domain (e.g., "What's the weather?", "Write me a poem", "How do I cook pasta?")
+     - "chitchat": A greeting, farewell, thanks, or social pleasantry (e.g., "Hello", "Thanks!", "Good job")
+
+  2. If the intent is "follow_up", you MUST:
+     a. Rewrite the message into a complete, self-contained question using the conversation history. The rewritten question must be understandable WITHOUT any prior context. Include all relevant filters, entities, and constraints from the prior conversation.
+     b. Determine the "resolved_intent" — what the rewritten question should be routed to. This is usually "graph_query" but could be "analytics", "visualization", or "discussion" if the follow-up is about graph analysis, a chart request, or reasoning about results.
+
+     Examples of good rewrites:
+     - Prior: "How many persons smoke in Rotterdam?" → Follow-up: "What about Amsterdam?" → Rewrite: "How many persons smoke in Amsterdam?" (resolved_intent: graph_query)
+     - Prior: "Show influencers with most followers" → Follow-up: "And their videos?" → Rewrite: "Show the videos of the influencers with the most followers" (resolved_intent: graph_query)
+     - Prior: "Count persons by gender in Feijenoord" → Follow-up: "Same for IJsselmonde" → Rewrite: "Count persons by gender in IJsselmonde" (resolved_intent: graph_query)
+
+  3. Provide a confidence score between 0.0 and 1.0.
+
+  Respond STRICTLY with JSON:
+  {
+    "intent": "<one of: graph_query, visualization, analytics, discussion, follow_up, off_topic, chitchat>",
+    "confidence": <float between 0 and 1>,
+    "rewritten_question": "<self-contained rewrite if follow_up, otherwise null>",
+    "resolved_intent": "<one of: graph_query, visualization, analytics, discussion — only required when intent is follow_up, otherwise omit>",
+    "reasoning": "<one sentence explaining the classification>"
+  }
+
+metadata:
+  owner: ai-team
+  created_at: 2025-11-15

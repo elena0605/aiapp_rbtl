@@ -3,6 +3,7 @@
 import { Message } from './ChatInterface'
 import CypherViewer from './CypherViewer'
 import ResultsTable from './ResultsTable'
+import VisualizationRenderer from './VisualizationRenderer'
 import { Trash2, Star } from 'lucide-react'
 
 function formatDateSeparator(date: Date): string {
@@ -174,10 +175,14 @@ export default function MessageList({
               </div>
             )}
             
-            {message.results && message.results.length > 0 && (
+            {message.results && message.results.length > 0 && !message.visualization && (
               <div className="mt-3 max-w-full overflow-x-auto">
                 <ResultsTable results={message.results} />
               </div>
+            )}
+
+            {message.visualization && (
+              <VisualizationRenderer visualization={message.visualization} />
             )}
             
             {message.error && message.cypher && (

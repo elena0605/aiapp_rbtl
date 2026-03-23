@@ -1,6 +1,6 @@
 id: graph.text_to_cypher
-version: 1
-description: Convert a user question into a Cypher statement using the provided schema, mappings and examples.
+version: 2
+description: Convert a user question into a Cypher statement using the provided schema, mappings, examples, and conversation context.
 tags: [graph, cypher, retrieval]
 params:
   temperature: 0.0
@@ -10,6 +10,7 @@ variables:
   - name: schema
   - name: terminology
   - name: examples
+  - name: conversation_context
   - name: question
 
 template: |
@@ -29,6 +30,10 @@ Treat it as semantic guidance, but ensure final Cypher uses real schema labels, 
 Examples:
 The following examples provide useful query patterns.
 {{examples}}
+
+Conversation context:
+The following is recent conversation history. Use it to resolve ambiguous references in the user question (e.g., "the same area", "those influencers", "and for males?"). If the current question is self-contained, ignore this section.
+{{conversation_context}}
 
 Format instructions:
 Do not include any explanations or apologies in your response.
@@ -69,6 +74,7 @@ tests:
       schema: "(:A)-[:R]->(:B)"
       terminology: ""
       examples: ""
+      conversation_context: "(no prior conversation)"
       question: "Return 10 A to B relationships"
     expect_regex: '^MATCH \(a:A\)-\[:R\]->\(b:B\).*LIMIT 10$'
 
