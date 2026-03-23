@@ -99,17 +99,14 @@ See `README.md` for the full list of optional knobs (`OUTPUT_MODE`, `DEBUG_PROMP
 
 ## 3. Launch Supporting Services
 
-```bash
-docker-compose -f docker-compose.langfuse.yml up -d
-```
+Start Langfuse from your dedicated Langfuse repository (or use Langfuse Cloud), then verify the configured host is reachable.
 
-Wait ~30 seconds and verify:
+Set matching values in this repo's `.env`:
+- `LANGFUSE_HOST` / `LANGFUSE_HOST_DEV`
+- `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_PUBLIC_KEY_DEV`
+- `LANGFUSE_SECRET_KEY` / `LANGFUSE_SECRET_KEY_DEV`
 
-- Langfuse UI: http://localhost:3001
-- PostgreSQL: localhost:5433
-- ClickHouse: localhost:8123
-
-Use `docker-compose ... logs -f` for troubleshooting.
+Example local UI: `http://localhost:3001`
 
 ## 4. Smoke Tests
 

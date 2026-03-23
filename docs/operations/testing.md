@@ -7,7 +7,7 @@ Testing currently focuses on scripted smoke tests plus manual validation through
 - `.env` populated with Neo4j, OpenAI, Langfuse, and MongoDB credentials.
 - Python 3.13+ virtual environment activated (`source venv/bin/activate`).
 - Node.js 18+ installed.
-- Neo4j instance reachable; Langfuse stack running (via `docker-compose.langfuse.yml`) if prompts are fetched from Langfuse.
+- Neo4j instance reachable; Langfuse service running (external repo or Langfuse Cloud) if prompts are fetched from Langfuse.
 
 ## Scripted Workflow
 

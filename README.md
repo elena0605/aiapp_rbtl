@@ -100,6 +100,21 @@ The application supports switching between **development** and **production** en
 - If `_DEV` variables are not set, it falls back to production variables
 - This allows you to override only the variables you need for local development
 
+**Applying `.env` changes to running containers:**
+- Containerized services do not automatically reload changed `.env` values
+- Restart or recreate backend/frontend after editing `.env`
+
+```bash
+# Quick reload (if containers already exist)
+docker-compose restart backend
+
+# Full env reload (recommended when changing multiple vars)
+docker-compose up -d --force-recreate backend frontend
+
+# If using dev Docker mode
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate backend frontend
+```
+
 **Example:** To use a local Neo4j instance for development while keeping production MongoDB:
 ```bash
 ENVIRONMENT=development
@@ -109,33 +124,77 @@ NEO4J_PASSWORD_DEV=local-password
 # MongoDB will use production MONGODB_URI since MONGODB_URI_DEV is not set
 ```
 
+#### Schema Cache Refresh (`schema.txt` and `visualization.json`)
+
+When `UPDATE_NEO4J_SCHEMA=true`, schema refresh does **not** happen just because containers start.
+It happens when the backend executes the schema loading path (for example, while handling a query or when running `ai/text_to_cypher.py`).
+
+This refresh updates:
+- `ai/schema/schema.txt`
+- `ai/schema/visualization.json`
+
+**Important:** `docker-compose up ... --force-recreate` recreates containers and reloads env vars, but does not by itself force schema extraction.
+
+**Force refresh in Production Docker mode:**
+
+```bash
+# 1) Ensure .env has:
+# ENVIRONMENT=production
+# UPDATE_NEO4J_SCHEMA=true
+
+# 2) Recreate containers
+docker-compose up -d --force-recreate backend frontend
+
+# 3) Force schema extraction immediately
+docker-compose exec backend sh -lc 'UPDATE_NEO4J_SCHEMA=true python ai/text_to_cypher.py --schema'
+```
+
+**Force refresh in Development Docker mode:**
+
+```bash
+# 1) Ensure .env has:
+# ENVIRONMENT=production or development (as needed)
+# UPDATE_NEO4J_SCHEMA=true
+
+# 2) Recreate containers with dev overrides
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate backend frontend
+
+# 3) Force schema extraction immediately
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec backend sh -lc 'UPDATE_NEO4J_SCHEMA=true python ai/text_to_cypher.py --schema'
+```
+
+**Alternative trigger (without running the CLI):**
+- Keep `UPDATE_NEO4J_SCHEMA=true`
+- Send one query in the chat app
+- Backend refreshes schema on that request path
+
+**Verification:**
+
+```bash
+# Confirm environment values in backend container
+docker-compose exec backend env | grep -E "ENVIRONMENT|UPDATE_NEO4J_SCHEMA"
+
+# Confirm cache files exist and were updated
+docker-compose exec backend sh -lc 'ls -lh ai/schema/schema.txt ai/schema/visualization.json'
+```
+
+After successful refresh, set `UPDATE_NEO4J_SCHEMA=false` and restart/recreate backend to avoid repeated refreshes.
+
 **To get Langfuse keys (if you are not provided with keys already):**
-1. Start Langfuse (Step 4)
+1. Start your Langfuse instance (external repo or Langfuse Cloud)
 2. Go to http://localhost:3001
 3. Create an account/login
 4. Go to Settings → API Keys
 5. Create a new API key and copy the public and secret keys
 
-### Step 4: Start Langfuse with Docker
+### Step 4: Ensure Langfuse is Running
 
-```bash
-docker-compose -f docker-compose.langfuse.yml up -d
-```
+Run Langfuse in your dedicated Langfuse repository (or use Langfuse Cloud), then set these values in `.env`:
+- `LANGFUSE_HOST` / `LANGFUSE_HOST_DEV`
+- `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_PUBLIC_KEY_DEV`
+- `LANGFUSE_SECRET_KEY` / `LANGFUSE_SECRET_KEY_DEV`
 
-Wait for services to be healthy (about 30 seconds), then verify:
-- Langfuse UI: http://localhost:3001
-- PostgreSQL: localhost:5433
-- ClickHouse: localhost:8123
-
-**To stop Langfuse:**
-```bash
-docker-compose -f docker-compose.langfuse.yml down
-```
-
-**To view logs:**
-```bash
-docker-compose -f docker-compose.langfuse.yml logs -f
-```
+Verify that the configured host is reachable (example local UI: `http://localhost:3001`).
 
 ### Step 5: Test the Setup
 
@@ -206,7 +265,7 @@ pip install -r requirements.txt
 - Test connection: `neo4j://...` or `neo4j+s://...` format
 
 #### Langfuse Connection Failed
-- Ensure Docker containers are running: `docker-compose -f docker-compose.langfuse.yml ps`
+- Ensure your external Langfuse service is running and reachable from this project
 - Check `.env` file has correct `LANGFUSE_HOST`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`
 - Verify Langfuse UI is accessible: http://localhost:3001
 - Ensure prompts exist in Langfuse with correct names and labels
@@ -235,11 +294,8 @@ pip install -r requirements.txt
 # Activate venv
 source venv/bin/activate
 
-# Start Langfuse
-docker-compose -f docker-compose.langfuse.yml up -d
-
-# Stop Langfuse
-docker-compose -f docker-compose.langfuse.yml down
+# Ensure Langfuse is running (external repo or Langfuse Cloud)
+# Then run:
 
 # Run basic test
 python ai/text_to_cypher.py "Return 5 Person nodes"
@@ -261,7 +317,6 @@ rbtl_graphrag/
 │   ├── schema/           # Neo4j schema utilities
 │   ├── terminology/       # Domain terminology definitions
 │   └── text_to_cypher.py # Main entry point
-├── docker-compose.langfuse.yml  # Langfuse Docker setup
 ├── requirements.txt      # Python dependencies
 └── utils/               # Shared utilities
     └── neo4j.py         # Neo4j connection utilities

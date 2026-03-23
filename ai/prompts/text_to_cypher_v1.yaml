@@ -13,91 +13,57 @@ variables:
   - name: question
 
 template: |
-Instructions:
-Generate one Cypher statement that answers the user question.
+Instructions: 
+Generate a single read-only Cypher statement to query a graph database and answer the user question below.
 
 Graph Database Schema:
 Use only the provided relationship types and properties in the schema.
-Do not use any relationship types or properties that are not provided.
+Do not use any relationship types, labels, or properties that are not provided in the schema.
 {{schema}}
 
 Terminology mapping:
-Use terminology to map user wording to schema properties and values.
+This section helps map user language to graph schema fields and values.
+Treat it as semantic guidance, but ensure final Cypher uses real schema labels, relationships, and properties.
 {{terminology}}
 
 Examples:
-Use examples as patterns, not strict templates.
+The following examples provide useful query patterns.
 {{examples}}
 
-Output format:
-- Output only Cypher.
-- No explanation, no prose, no markdown, no code fences.
+Format instructions:
+Do not include any explanations or apologies in your response.
+Do not respond to anything except constructing the Cypher statement.
+Do not include any text except the generated Cypher statement.
+Do not use markdown/code blocks.
+ONLY RESPOND WITH CYPHER.
 
-INTERNAL PLANNING WORKFLOW (DO NOT OUTPUT):
-1) Identify intent type:
-   - lookup, prevalence/rate, comparison, association/correlation, ranking, trend.
-2) Normalize wording:
-   - Treat paraphrases as equivalent:
-     prevalence/rate/proportion/percentage
-     associated with/related to/linked to/clustered with
-     higher/lower/more/less
-3) Resolve concepts:
-   - First try direct property mapping.
-   - If abstract concept is used, resolve via terminology.abstract_concepts.indicators.
-   - If multiple concepts are used, include indicators from all relevant concepts.
-4) Build query:
-   - Use read-only Cypher only.
-   - Compute metrics required by the intent.
-5) Self-check:
-   - Uses only allowed schema elements.
-   - Matches question intent.
-   - Safe division and valid array handling.
+Read-only and safety constraints:
+Generate read-only Cypher only.
+Never generate write or schema-changing operations, including (but not limited to): CREATE, MERGE, DELETE, SET, REMOVE, DROP, CALL dbms.*, CREATE INDEX/CONSTRAINT, or any data-modifying procedure.
+Use Neo4j Cypher only. Do not use APOC or other procedures unless they are explicitly present in the provided schema/examples.
+Return exactly one Cypher query.
 
-SECURITY RESTRICTION - READ-ONLY:
-- Generate read-only queries only (MATCH/OPTIONAL MATCH/WITH/WHERE/RETURN/ORDER BY/LIMIT).
-- Never use CREATE, SET, DELETE, REMOVE, MERGE, DETACH DELETE, FOREACH.
-- If request requires write/modification, return empty response.
+Fallback behavior:
+If the question cannot be answered with the provided schema/terminology, return an empty string.
 
-SEMANTIC CORRECTNESS:
-- Query must answer the exact question.
-- Do not ignore key parts of the question.
-- If concept does not exist in schema/terminology, return empty response.
+RETURN clause guidelines:
+Only return properties explicitly mentioned in the user's question.
+Include properties directly related to the query criteria (e.g., if filtering by age and smoking, return those).
+Do NOT include unrelated properties unless explicitly requested.
+Keep RETURN clauses minimal and focused on the user request.
+SECURITY RESTRICTION: UserID is sensitive data and must NEVER be returned, even if explicitly requested. Never include p.UserID, UserID, or any variation in RETURN clauses.
 
-RETURN RULES:
-- Return minimal fields needed to answer the question.
-- Include fields used for filtering/comparison when needed for interpretation.
-- Convert temporal outputs with toString().
+Type/value handling rules:
+For Person categorical string fields, use exact equality with canonical values from terminology (e.g., p.smoking_frequency = 'Never Smoked').
+Do not use partial matching (CONTAINS, STARTS WITH, ENDS WITH) for Person categorical fields unless explicitly required by the question.
+Use numeric comparisons for numeric fields (e.g., gender, school_year).
+When returning gender to users, map numeric codes to human-readable labels via CASE.
 
-AGGREGATED PERSON ARRAY RULES:
-- All person_* properties are aggregated arrays.
-- Never treat person_* as scalar values.
-- Use exact value strings from terminology (case-sensitive).
-- Prevalence pattern:
-  size(array) AS total_responses
-  size([x IN array WHERE x IN [value1, value2, ...]]) AS relevant_count
-  ROUND(100.0 * relevant_count / total_responses, 2) AS relevant_perc
-- Always protect division:
-  WHERE total_responses > 0
+Temporal handling:
+Convert Neo4j temporal properties (DateTime, LocalDateTime, Date, Time, Duration) to strings using toString() only when those fields are returned.
+Example: RETURN toString(tc.create_time) AS create_time
 
-ASSOCIATION / COMPARISON RULES:
-- If question asks association/comparison/correlation or uses phrases like:
-  "associated with", "more likely", "also show", "higher/lower than", "relationship between", "clustered with"
-  then:
-  - compute metrics for each side separately
-  - return both metrics in the same row (same Area or Municipality)
-  - optionally return a difference metric for easier interpretation
-
-ABSTRACT CONCEPTS:
-- For abstract concepts (e.g., well-being, mental health, school safety, physical exercise, unhealthy diet, demographics):
-  - resolve through terminology.abstract_concepts
-  - use only listed indicators
-  - use minimal but sufficient indicator set to answer intent
-
-FAILURE POLICY:
-- Return empty only after failing:
-  direct property mapping -> abstract concept mapping -> paraphrase normalization.
-
-USER QUESTION: {{question}}
+User question: {{question}}
 tests:
   - input:
       schema: "(:A)-[:R]->(:B)"

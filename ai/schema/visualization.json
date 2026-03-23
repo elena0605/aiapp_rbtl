@@ -6,6 +6,11 @@
       "constraints": []
     },
     {
+      "name": "YouTubeComment",
+      "indexes": [],
+      "constraints": []
+    },
+    {
       "name": "Municipality",
       "indexes": [],
       "constraints": []
@@ -61,6 +66,11 @@
       "constraints": []
     },
     {
+      "name": "Person",
+      "indexes": [],
+      "constraints": []
+    },
+    {
       "name": "TikTokVideo",
       "indexes": [],
       "constraints": []
@@ -73,9 +83,24 @@
       "TikTokSticker"
     ],
     [
+      "YouTubeVideo",
+      "HAS_COMMENT",
+      "TikTokComment"
+    ],
+    [
+      "YouTubeVideo",
+      "HAS_COMMENT",
+      "YouTubeComment"
+    ],
+    [
       "TikTokVideo",
       "HAS_COMMENT",
       "TikTokComment"
+    ],
+    [
+      "TikTokVideo",
+      "HAS_COMMENT",
+      "YouTubeComment"
     ],
     [
       "Area",
@@ -83,12 +108,12 @@
       "Municipality"
     ],
     [
-      "Municipality",
-      "FOLLOWS",
-      "Influencer"
+      "Person",
+      "LIVES_IN_MUNICIPALITY",
+      "Municipality"
     ],
     [
-      "Area",
+      "Person",
       "FOLLOWS",
       "Influencer"
     ],
@@ -98,9 +123,29 @@
       "YoutubeVideoTopic"
     ],
     [
+      "Person",
+      "LIVES_IN_AREA",
+      "Area"
+    ],
+    [
+      "YouTubeComment",
+      "REPLY_TO_COMMENT",
+      "YouTubeComment"
+    ],
+    [
+      "YouTubeVideo",
+      "HAS_TAG",
+      "TikTokHashTag"
+    ],
+    [
       "TikTokVideo",
       "HAS_TAG",
       "TikTokHashTag"
+    ],
+    [
+      "YouTubeVideo",
+      "HAS_TAG",
+      "YoutubeVideoTag"
     ],
     [
       "TikTokVideo",
@@ -108,14 +153,9 @@
       "YoutubeVideoTag"
     ],
     [
-      "YouTubeVideo",
-      "HAS_TAG",
-      "TikTokHashTag"
-    ],
-    [
-      "YouTubeVideo",
-      "HAS_TAG",
-      "YoutubeVideoTag"
+      "TikTokUser",
+      "HAS_VIDEO",
+      "TikTokVideo"
     ],
     [
       "TikTokUser",
@@ -131,21 +171,16 @@
       "YouTubeChannel",
       "HAS_VIDEO",
       "YouTubeVideo"
-    ],
-    [
-      "TikTokUser",
-      "HAS_VIDEO",
-      "TikTokVideo"
-    ],
-    [
-      "Influencer",
-      "HAS_ACCOUNT",
-      "YouTubeChannel"
     ],
     [
       "Influencer",
       "HAS_ACCOUNT",
       "TikTokUser"
+    ],
+    [
+      "Influencer",
+      "HAS_ACCOUNT",
+      "YouTubeChannel"
     ]
   ]
 }

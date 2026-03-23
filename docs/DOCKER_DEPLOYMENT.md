@@ -227,6 +227,62 @@ docker-compose restart backend
 docker-compose up -d --force-recreate backend
 ```
 
+#### Schema Cache Refresh (`schema.txt` and `visualization.json`)
+
+When `UPDATE_NEO4J_SCHEMA=true`, schema refresh does **not** happen just because containers start.
+It happens when the backend actually runs the schema loading path (for example, when processing a query or running `ai/text_to_cypher.py`).
+
+This refresh updates:
+- `ai/schema/schema.txt`
+- `ai/schema/visualization.json`
+
+**Important:** `docker-compose up ... --force-recreate` only recreates containers and reloads environment variables. It does not by itself force schema extraction.
+
+**Recommended force-refresh workflow (Production Docker mode):**
+
+```bash
+# 1) Ensure .env has:
+# ENVIRONMENT=production
+# UPDATE_NEO4J_SCHEMA=true
+
+# 2) Recreate containers (production Docker mode)
+docker-compose up -d --force-recreate backend frontend
+
+# 3) Force schema extraction immediately
+docker-compose exec backend sh -lc 'UPDATE_NEO4J_SCHEMA=true python ai/text_to_cypher.py --schema'
+```
+
+**Recommended force-refresh workflow (Development Docker mode):**
+
+```bash
+# 1) Ensure .env has:
+# ENVIRONMENT=production or development (as needed)
+# UPDATE_NEO4J_SCHEMA=true
+
+# 2) Recreate containers with dev overrides
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --force-recreate backend frontend
+
+# 3) Force schema extraction immediately
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml exec backend sh -lc 'UPDATE_NEO4J_SCHEMA=true python ai/text_to_cypher.py --schema'
+```
+
+**Alternative trigger (without CLI command):**
+- Keep `UPDATE_NEO4J_SCHEMA=true`
+- Send one query from the chat app
+- The backend will refresh schema on that request path
+
+**Verification commands:**
+
+```bash
+# Confirm container environment
+docker-compose exec backend env | grep -E "ENVIRONMENT|UPDATE_NEO4J_SCHEMA"
+
+# Confirm cache files exist and were updated
+docker-compose exec backend sh -lc 'ls -lh ai/schema/schema.txt ai/schema/visualization.json'
+```
+
+After successful refresh, set `UPDATE_NEO4J_SCHEMA=false` in `.env` and recreate/restart backend to avoid refreshing on every schema load.
+
 #### Understanding the Two Concepts
 
 There are **two independent concepts** that can be mixed and matched:
