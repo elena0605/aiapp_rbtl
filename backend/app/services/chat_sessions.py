@@ -125,6 +125,32 @@ def set_message_favorite(username: str, message_id: str, is_favorite: bool) -> b
     return True
 
 
+def set_message_feedback(username: str, message_id: str, rating: str) -> bool:
+    """Persist a feedback rating ('up'/'down') on a message in chat history."""
+    normalized = ensure_allowed_username(username)
+    collection = get_chat_sessions_collection()
+    doc = collection.find_one({"username": normalized}, {"messages": 1})
+    if not doc or "messages" not in doc:
+        return False
+
+    messages = doc.get("messages", [])
+    updated = False
+    for message in messages:
+        if message.get("id") == message_id:
+            message["feedback"] = rating
+            updated = True
+            break
+
+    if not updated:
+        return False
+
+    collection.update_one(
+        {"username": normalized},
+        {"$set": {"messages": messages, "updated_at": datetime.utcnow()}},
+    )
+    return True
+
+
 def get_favorite_messages(username: str) -> List[Dict[str, Any]]:
     normalized = ensure_allowed_username(username)
     collection = get_chat_sessions_collection()

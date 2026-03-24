@@ -8,6 +8,7 @@ import {
   fetchChatHistory,
   deleteChatMessage,
   toggleFavoriteMessage,
+  submitFeedback,
   ChatResponse,
   ChatHistoryResponse,
   ChatMessageRecord,
@@ -30,6 +31,7 @@ export interface Message {
   timestamp: Date
   isFavorite?: boolean
   timings?: Record<string, number>
+  feedback?: 'up' | 'down'
 }
 
 interface ChatInterfaceProps {
@@ -238,6 +240,7 @@ export default function ChatInterface({
       timestamp: new Date(record.timestamp),
       isFavorite: record.is_favorite,
       timings: hasError ? undefined : (record as any).timings,
+      feedback: record.feedback,
     }
   }
 
@@ -433,6 +436,44 @@ export default function ChatInterface({
     }
   }
 
+  const handleSubmitFeedback = async (messageId: string, rating: 'up' | 'down', comment?: string) => {
+    if (!selectedUser) return
+
+    const messageIndex = messages.findIndex((m) => m.id === messageId)
+    const message = messageIndex >= 0 ? messages[messageIndex] : undefined
+    if (!message) return
+
+    let question: string | undefined
+    for (let i = messageIndex - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') {
+        question = messages[i].content
+        break
+      }
+    }
+
+    try {
+      await submitFeedback({
+        username: selectedUser,
+        message_id: messageId,
+        rating,
+        comment,
+        question,
+        answer: message.content,
+        cypher: message.cypher,
+        route_type: message.route_type,
+      })
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === messageId ? { ...msg, feedback: rating } : msg
+        )
+      )
+    } catch (error) {
+      setHistoryError(
+        `Failed to submit feedback${error instanceof Error ? `: ${error.message}` : ''}`
+      )
+    }
+  }
+
   return (
     <div className="flex flex-col h-full border border-gray-300 rounded-lg shadow-lg bg-white overflow-hidden">
       {historyError && (
@@ -447,6 +488,7 @@ export default function ChatInterface({
           deletingMessageId={deletingMessageId}
           onToggleFavorite={handleToggleFavorite}
           favoriteUpdatingId={favoriteUpdatingId}
+          onSubmitFeedback={handleSubmitFeedback}
         />
         {isLoading && (
           <div className="w-full max-w-md bg-gray-50 border border-gray-200 rounded-lg p-4 space-y-3 text-sm text-gray-600">

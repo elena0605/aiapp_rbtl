@@ -1,10 +1,11 @@
 'use client'
 
+import { useState } from 'react'
 import { Message } from './ChatInterface'
 import CypherViewer from './CypherViewer'
 import ResultsTable from './ResultsTable'
 import VisualizationRenderer from './VisualizationRenderer'
-import { Trash2, Star } from 'lucide-react'
+import { Trash2, Star, ThumbsUp, ThumbsDown, Send } from 'lucide-react'
 
 function formatDateSeparator(date: Date): string {
   const now = new Date()
@@ -36,6 +37,127 @@ interface MessageListProps {
   deletingMessageId?: string | null
   onToggleFavorite?: (id: string, nextState: boolean) => void
   favoriteUpdatingId?: string | null
+  onSubmitFeedback?: (messageId: string, rating: 'up' | 'down', comment?: string) => void
+}
+
+function FeedbackWidget({
+  message,
+  onSubmitFeedback,
+}: {
+  message: Message
+  onSubmitFeedback: (messageId: string, rating: 'up' | 'down', comment?: string) => void
+}) {
+  const [pendingRating, setPendingRating] = useState<'up' | 'down' | null>(null)
+  const [comment, setComment] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  const alreadyRated = !!message.feedback
+
+  const handleThumbClick = async (rating: 'up' | 'down') => {
+    if (alreadyRated) return
+    setPendingRating(rating)
+  }
+
+  const handleSubmit = async () => {
+    if (!pendingRating || isSubmitting) return
+    setIsSubmitting(true)
+    try {
+      await onSubmitFeedback(message.id, pendingRating, comment.trim() || undefined)
+      setPendingRating(null)
+      setComment('')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleSkipComment = async () => {
+    if (!pendingRating || isSubmitting) return
+    setIsSubmitting(true)
+    try {
+      await onSubmitFeedback(message.id, pendingRating, undefined)
+      setPendingRating(null)
+      setComment('')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  if (alreadyRated) {
+    return (
+      <div className="mt-3 pt-2 border-t border-gray-200 flex items-center gap-2 text-xs text-gray-500">
+        <span>Feedback submitted</span>
+        {message.feedback === 'up' ? (
+          <ThumbsUp size={12} className="text-green-600" fill="currentColor" />
+        ) : (
+          <ThumbsDown size={12} className="text-red-500" fill="currentColor" />
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="mt-3 pt-2 border-t border-gray-200">
+      <div className="flex items-center gap-3">
+        <span className="text-xs text-gray-500">Was this helpful?</span>
+        <button
+          onClick={() => handleThumbClick('up')}
+          className={`p-1.5 rounded-full transition-colors ${
+            pendingRating === 'up'
+              ? 'bg-green-100 text-green-600'
+              : 'text-gray-400 hover:bg-gray-200 hover:text-green-600'
+          }`}
+          title="Helpful"
+        >
+          <ThumbsUp size={14} fill={pendingRating === 'up' ? 'currentColor' : 'none'} />
+        </button>
+        <button
+          onClick={() => handleThumbClick('down')}
+          className={`p-1.5 rounded-full transition-colors ${
+            pendingRating === 'down'
+              ? 'bg-red-100 text-red-500'
+              : 'text-gray-400 hover:bg-gray-200 hover:text-red-500'
+          }`}
+          title="Not helpful"
+        >
+          <ThumbsDown size={14} fill={pendingRating === 'down' ? 'currentColor' : 'none'} />
+        </button>
+      </div>
+
+      {pendingRating && (
+        <div className="mt-2 space-y-2">
+          <textarea
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            placeholder="Add a comment (optional)..."
+            className="w-full text-sm border border-gray-300 rounded-md p-2 resize-none focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-blue-400"
+            rows={2}
+            disabled={isSubmitting}
+          />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleSubmit}
+              disabled={isSubmitting}
+              className="flex items-center gap-1 px-3 py-1 text-xs font-medium text-white bg-blue-500 rounded-md hover:bg-blue-600 disabled:opacity-50 transition-colors"
+            >
+              {isSubmitting ? (
+                <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white"></div>
+              ) : (
+                <Send size={12} />
+              )}
+              Send Feedback
+            </button>
+            <button
+              onClick={handleSkipComment}
+              disabled={isSubmitting}
+              className="px-3 py-1 text-xs text-gray-500 hover:text-gray-700 transition-colors"
+            >
+              Skip
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default function MessageList({
@@ -44,12 +166,13 @@ export default function MessageList({
   deletingMessageId,
   onToggleFavorite,
   favoriteUpdatingId,
+  onSubmitFeedback,
 }: MessageListProps) {
   if (messages.length === 0) {
     return (
       <div className="text-center text-gray-500 py-8">
         <p>Start a conversation by asking a question about your data.</p>
-        <p className="text-sm mt-2">Example: "How many TikTok users have over 1 million followers?"</p>
+        <p className="text-sm mt-2">Example: &quot;How many TikTok users have over 1 million followers?&quot;</p>
       </div>
     )
   }
@@ -195,6 +318,10 @@ export default function MessageList({
                 </div>
               </div>
             )}
+
+            {message.role === 'assistant' && onSubmitFeedback && message.id && !message.error && (
+              <FeedbackWidget message={message} onSubmitFeedback={onSubmitFeedback} />
+            )}
           </div>
         </div>
         </div>
@@ -202,4 +329,3 @@ export default function MessageList({
     </div>
   )
 }
-

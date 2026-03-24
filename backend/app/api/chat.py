@@ -17,6 +17,7 @@ from backend.app.services.chat_sessions import (
     list_test_users,
     delete_chat_message,
     set_message_favorite,
+    set_message_feedback,
     get_favorite_messages,
 )
 router = APIRouter()
@@ -39,10 +40,12 @@ class ChatMessage(BaseModel):
     results: Optional[List[Dict[str, Any]]] = None
     summary: Optional[str] = None
     examples: Optional[List[Dict[str, Any]]] = None
+    visualization: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
     timestamp: datetime
     is_favorite: bool = False
     timings: Optional[Dict[str, float]] = None
+    feedback: Optional[str] = None
 
 
 class ChatHistoryResponse(BaseModel):
@@ -91,6 +94,17 @@ class FavoriteRequest(BaseModel):
     is_favorite: bool = True
 
 
+class FeedbackSubmitRequest(BaseModel):
+    username: str
+    message_id: str
+    rating: str  # "up" or "down"
+    comment: Optional[str] = None
+    question: Optional[str] = None
+    answer: Optional[str] = None
+    cypher: Optional[str] = None
+    route_type: Optional[str] = None
+
+
 @router.get("/chat/users")
 async def list_chat_users():
     """Return available tester usernames."""
@@ -106,6 +120,12 @@ async def get_chat_history(username: str):
         raise HTTPException(status_code=403, detail=str(exc))
 
     history = fetch_chat_history(normalized)
+    for msg in history.get("messages", []):
+        timings = msg.get("timings")
+        if isinstance(timings, dict):
+            for k, v in list(timings.items()):
+                if isinstance(v, list):
+                    timings[k] = sum(v)
     return ChatHistoryResponse(**history)
 
 
@@ -160,6 +180,46 @@ async def list_favorites(username: str):
         )
 
     return FavoritesResponse(username=normalized, favorites=formatted)
+
+
+@router.post("/chat/feedback")
+async def submit_feedback(request: FeedbackSubmitRequest):
+    """Store user feedback (thumbs up/down + optional comment) and send email notification."""
+    from backend.app.services.feedback import store_feedback, send_feedback_email
+
+    if request.rating not in ("up", "down"):
+        raise HTTPException(status_code=400, detail="rating must be 'up' or 'down'")
+
+    try:
+        ensure_allowed_username(request.username)
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+
+    store_feedback(
+        message_id=request.message_id,
+        username=request.username,
+        rating=request.rating,
+        comment=request.comment,
+        question=request.question,
+        answer=request.answer,
+        cypher=request.cypher,
+        route_type=request.route_type,
+    )
+
+    set_message_feedback(request.username, request.message_id, request.rating)
+
+    await send_feedback_email(
+        rating=request.rating,
+        username=request.username,
+        question=request.question,
+        answer=request.answer,
+        cypher=request.cypher,
+        comment=request.comment,
+        route_type=request.route_type,
+    )
+
+    return {"message": "Feedback submitted successfully"}
+
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):

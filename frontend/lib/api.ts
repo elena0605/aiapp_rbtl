@@ -50,6 +50,7 @@ export interface ChatMessageRecord {
   timestamp: string
   is_favorite?: boolean
   timings?: Record<string, number>
+  feedback?: 'up' | 'down'
 }
 
 export interface ChatHistoryResponse {
@@ -168,6 +169,21 @@ export interface GraphVisualizationResponse {
   nodes?: any[]
   relationships?: any[]
   [key: string]: any
+}
+
+export interface FeedbackRequest {
+  username: string
+  message_id: string
+  rating: 'up' | 'down'
+  comment?: string
+  question?: string
+  answer?: string
+  cypher?: string
+  route_type?: string
+}
+
+export async function submitFeedback(feedback: FeedbackRequest): Promise<void> {
+  await axios.post(`${API_URL}/api/chat/feedback`, feedback)
 }
 
 export async function fetchGraphVisualization(): Promise<GraphVisualizationResponse> {
