@@ -134,9 +134,9 @@ export default function MessageList({
               <div className="whitespace-pre-wrap break-words overflow-wrap-anywhere text-red-600 font-medium">
                 {message.content}
               </div>
-            ) : (
+            ) : !message.visualization ? (
               <div className="whitespace-pre-wrap break-words overflow-wrap-anywhere">{message.content}</div>
-            )}
+            ) : null}
             
             {message.cypher && (
               <div className="mt-3 max-w-full overflow-x-auto">
@@ -157,11 +157,13 @@ export default function MessageList({
               </div>
             )}
             
-            {message.timings && message.role === 'assistant' && (
+            {message.timings && message.role === 'assistant' && Object.keys(message.timings).length > 0 && (
               <div className="mt-3 text-xs">
                 <div className="font-semibold mb-1">Query timings:</div>
                 <ul className="space-y-1">
-                  {Object.entries(message.timings).map(([key, value]) => (
+                  {Object.entries(message.timings)
+                    .filter(([key]) => !['correction_attempts', 'retry_count'].includes(key))
+                    .map(([key, value]) => (
                     <li key={key} className="flex justify-between items-center">
                       <span className="text-gray-600">
                         {key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}:

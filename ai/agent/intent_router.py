@@ -292,6 +292,21 @@ class IntentRouter:
 
         return "\n".join(lines) if lines else "(no prior conversation)"
 
+    # Patterns that strongly suggest a follow-up referencing prior conversation
+    _FOLLOW_UP_PATTERNS = [
+        re.compile(r"^what\s+about\s+(.+?)\??$", re.IGNORECASE),
+        re.compile(r"^how\s+about\s+(.+?)\??$", re.IGNORECASE),
+        re.compile(r"^and\s+(?:for|in|with)\s+(.+?)\??$", re.IGNORECASE),
+        re.compile(r"^same\s+(?:but\s+)?(?:for|in|with)\s+(.+?)\??$", re.IGNORECASE),
+        re.compile(r"^(?:now\s+)?(?:for|in)\s+(.+?)\??$", re.IGNORECASE),
+        re.compile(r"^(?:what|how)\s+(?:if|about)\s+(.+?)\??$", re.IGNORECASE),
+    ]
+
+    _CHITCHAT_PATTERNS = re.compile(
+        r"^(?:hi|hello|hey|thanks?|thank\s+you|thx|bye|goodbye|see\s+you|good\s+(?:morning|afternoon|evening|night))[\s!.?]*$",
+        re.IGNORECASE,
+    )
+
     async def classify(
         self,
         question: str,
@@ -327,7 +342,14 @@ class IntentRouter:
 
         logger.debug("Intent classify: raw LLM response (%d chars): %r", len(raw), raw[:500])
 
-        result = self._parse_response(raw, question)
+        if not raw.strip():
+            logger.warning(
+                "Intent classify: LLM returned empty, using rule-based fallback"
+            )
+            result = self._fallback_classify(question, conversation_history)
+        else:
+            result = self._parse_response(raw, question)
+
         logger.info(
             "Intent classified: intent=%s confidence=%.2f is_follow_up=%s question=%r rewritten=%r",
             result.intent,
@@ -338,6 +360,95 @@ class IntentRouter:
         )
         return result
 
+    def _fallback_classify(
+        self,
+        question: str,
+        conversation_history: List[Dict[str, Any]],
+    ) -> IntentResult:
+        """Rule-based fallback when the LLM fails to return a response."""
+        q = question.strip()
+
+        # Chitchat
+        if self._CHITCHAT_PATTERNS.match(q):
+            return IntentResult(
+                intent="chitchat",
+                confidence=0.8,
+                rewritten_question=None,
+                reasoning="Rule-based fallback: detected greeting/pleasantry pattern.",
+                original_question=question,
+            )
+
+        # Follow-up detection — only if there's conversation history
+        user_messages = [
+            m for m in (conversation_history or [])
+            if m.get("role") == "user"
+        ]
+        assistant_messages = [
+            m for m in (conversation_history or [])
+            if m.get("role") == "assistant"
+        ]
+
+        if user_messages and assistant_messages:
+            for pattern in self._FOLLOW_UP_PATTERNS:
+                match = pattern.match(q)
+                if match:
+                    new_subject = match.group(1).strip().rstrip("?.")
+                    last_user_q = user_messages[-1].get("content", "")
+                    rewritten = self._simple_rewrite(last_user_q, new_subject)
+                    if rewritten:
+                        logger.info(
+                            "Fallback follow-up rewrite: %r -> %r",
+                            question, rewritten,
+                        )
+                        return IntentResult(
+                            intent="graph_query",
+                            confidence=0.6,
+                            rewritten_question=rewritten,
+                            reasoning=f"Rule-based fallback: follow-up pattern matched, substituted '{new_subject}' into previous question.",
+                            original_question=question,
+                            is_follow_up=True,
+                        )
+
+        # Default: treat as graph_query and let the Cypher pipeline handle it
+        return IntentResult(
+            intent="graph_query",
+            confidence=0.3,
+            rewritten_question=None,
+            reasoning="Rule-based fallback: no pattern matched, defaulting to graph_query.",
+            original_question=question,
+        )
+
+    @staticmethod
+    def _simple_rewrite(previous_question: str, new_subject: str) -> Optional[str]:
+        """Attempt a simple substitution of the new subject into the previous question.
+
+        Looks for area names, municipality names, or the last noun phrase
+        in the previous question and replaces it with *new_subject*.
+        """
+        if not previous_question:
+            return None
+
+        # Common area/location patterns in the prior question
+        # Try to replace the last quoted or capitalized proper noun
+        area_pattern = re.compile(
+            r"(?:in|for|about|of)\s+([A-Z][a-zA-Z\s\-]+?)(?:\s*\?|$|,|\s+(?:area|municipality|district))",
+            re.IGNORECASE,
+        )
+        match = area_pattern.search(previous_question)
+        if match:
+            old_subject = match.group(1).strip()
+            return previous_question.replace(old_subject, new_subject)
+
+        # Fallback: just replace the last significant proper noun
+        # (capitalized word that isn't at the start of the sentence)
+        words = previous_question.split()
+        for i in range(len(words) - 1, 0, -1):
+            word = words[i].strip("?,!.")
+            if word and word[0].isupper() and len(word) > 2:
+                return previous_question.replace(word, new_subject)
+
+        return None
+
     def _call_llm(self, rendered: str) -> str:
         """Call the LLM with retries for empty responses and format issues."""
         # Attempt 1: with JSON response format
@@ -346,7 +457,7 @@ class IntentRouter:
                 rendered,
                 model=self._llm_model,
                 temperature=0.0,
-                max_tokens=400,
+                max_tokens=600,
                 response_format={"type": "json_object"},
             )
             if raw.strip():
@@ -368,7 +479,7 @@ class IntentRouter:
                 rendered,
                 model=self._llm_model,
                 temperature=0.0,
-                max_tokens=400,
+                max_tokens=600,
             )
             if raw.strip():
                 return raw

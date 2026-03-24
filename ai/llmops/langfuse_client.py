@@ -8,6 +8,7 @@ This module handles:
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -75,6 +76,39 @@ def _init_langfuse_client() -> Any:
 # ============================================================================
 # LLM API Calls with Tracing
 # ============================================================================
+
+def _log_completion_diagnostics(res: Any, *, model: str, label: str) -> None:
+    """Log finish_reason and content-filter details from a chat completion response."""
+    try:
+        choice = res.choices[0] if res.choices else None
+        if choice is None:
+            print(f"[LLM][{label}] model={model} WARNING: response has no choices", file=sys.stderr)
+            return
+
+        finish_reason = getattr(choice, "finish_reason", None)
+        content = (choice.message.content or "") if choice.message else ""
+        content_len = len(content)
+
+        # Azure returns content_filter_results on the choice when filtering triggers
+        filter_results = getattr(choice, "content_filter_results", None)
+
+        if finish_reason == "content_filter" or (content_len == 0 and finish_reason != "stop"):
+            parts = [
+                f"[LLM][{label}] WARNING model={model}",
+                f"finish_reason={finish_reason}",
+                f"content_len={content_len}",
+            ]
+            if filter_results is not None:
+                parts.append(f"filter_results={filter_results}")
+            print(" ".join(parts), file=sys.stderr)
+        else:
+            print(
+                f"[LLM][{label}] model={model} finish_reason={finish_reason} content_len={content_len}",
+                file=sys.stderr,
+            )
+    except Exception as exc:
+        print(f"[LLM][{label}] diagnostics error: {exc}", file=sys.stderr)
+
 
 def create_completion(
     prompt: str, 
@@ -256,10 +290,9 @@ def create_completion(
                     "OPENAI_API_KEY is required."
                 )
             
+            _log_completion_diagnostics(res, model=model, label="langfuse")
             return (res.choices[0].message.content or "").strip()
         except Exception as e:
-            # Log error but fall through to official client
-            import sys
             print(f"Langfuse tracing error: {e}", file=sys.stderr)
             pass
 
@@ -348,6 +381,7 @@ def create_completion(
             "Either AZURE_OPENAI_ENDPOINT + AZURE_OPENAI_API_KEY or "
             "OPENAI_API_KEY is required when Langfuse is not configured."
         )
+    _log_completion_diagnostics(resp, model=model, label="fallback")
     return (resp.choices[0].message.content or "").strip()
 
 

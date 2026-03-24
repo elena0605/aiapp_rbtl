@@ -1,0 +1,69 @@
+id: graph.cypher_correction
+version: 1
+description: Correct a failed Cypher query based on error feedback (syntax errors or empty results).
+tags: [graph, cypher, correction, retry]
+params:
+  temperature: 0.0
+  max_tokens: 1200
+
+variables:
+  - name: schema
+    description: The graph database schema
+  - name: terminology
+    description: Terminology mapping for user language to schema fields
+  - name: examples
+    description: Few-shot Cypher examples for reference
+  - name: question
+    description: The original user question
+  - name: failed_cypher
+    description: The Cypher query that failed
+  - name: error_feedback
+    description: The error message or reason for failure
+  - name: feedback_type
+    description: Either "syntax_error" or "empty_results"
+
+template: |
+  You are a Cypher query correction expert. A previous attempt to generate a Cypher query failed. Your job is to produce a corrected query.
+
+  Graph Database Schema:
+  {{schema}}
+
+  Terminology mapping:
+  {{terminology}}
+
+  Reference examples:
+  {{examples}}
+
+  Original user question:
+  {{question}}
+
+  Previous (failed) Cypher query:
+  {{failed_cypher}}
+
+  Error feedback:
+  {{error_feedback}}
+
+  Failure type: {{feedback_type}}
+
+  Instructions based on failure type:
+
+  If failure type is "syntax_error":
+  - The query has a Cypher syntax or schema error. Fix the syntax while preserving the original intent.
+  - Common issues: implicit grouping in aggregations (use WITH to separate), incorrect property names, wrong relationship directions.
+  - For aggregation errors: ensure all non-aggregated columns in RETURN are either grouping keys or computed from aggregated values. Use an intermediate WITH clause to separate the aggregation.
+
+  If failure type is "empty_results":
+  - The query executed but returned 0 rows. This often means property values don't match what's in the database.
+  - Check the terminology mapping above for correct property values (exact casing, spacing, canonical values).
+  - Consider relaxing filters: remove overly specific constraints, use broader matching, or check if the property field name is correct.
+  - Do NOT change the fundamental intent of the query — just fix the filters so they match actual data.
+
+  Rules:
+  - Generate read-only Cypher only. Never use CREATE, MERGE, DELETE, SET, REMOVE, or DROP.
+  - Return exactly one corrected Cypher query.
+  - Do not include any explanations — only the Cypher statement.
+  - If you cannot fix the query, return an empty string.
+
+metadata:
+  owner: ai-team
+  created_at: 2026-03-23

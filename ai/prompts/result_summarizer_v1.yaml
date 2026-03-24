@@ -4,7 +4,7 @@ description: Summarize Cypher query results into a conversational answer for the
 tags: [graph, summarization, results]
 params:
   temperature: 0.0
-  max_tokens: 600
+  max_tokens: 1200
 
 variables:
   - name: question

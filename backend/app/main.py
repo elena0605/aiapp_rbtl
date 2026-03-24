@@ -58,6 +58,13 @@ app.include_router(chat.router, prefix="/api", tags=["chat"])
 app.include_router(knowledge_base.router, prefix="/api", tags=["knowledge-base"])
 app.include_router(graph_info.router, prefix="/api", tags=["graph-info"])
 
+
+@app.on_event("startup")
+async def startup_warmup():
+    """Eagerly load expensive resources so the first user request is fast."""
+    await graphrag_service.warmup()
+
+
 @app.get("/")
 async def root():
     """Root endpoint."""

@@ -19,11 +19,13 @@ from backend.app.services.chat_sessions import (
     set_message_favorite,
     get_favorite_messages,
 )
-from backend.app.services.graphrag import GraphRAGService
-
-
 router = APIRouter()
-graphrag_service = GraphRAGService()
+
+
+def _get_graphrag_service():
+    """Get the shared GraphRAGService instance from the main app (warmed up at startup)."""
+    from backend.app.main import graphrag_service
+    return graphrag_service
 
 
 class ChatMessage(BaseModel):
@@ -181,7 +183,7 @@ async def chat(request: ChatRequest):
     ]
 
     try:
-        result = await graphrag_service.process_question(
+        result = await _get_graphrag_service().process_question(
             question=request.question,
             execute_cypher=request.execute_cypher,
             output_mode=request.output_mode,
@@ -207,6 +209,7 @@ async def chat(request: ChatRequest):
             "results": None if error_msg else result.get("results"),
             "summary": None if error_msg else result.get("summary"),
             "examples": None if error_msg else result.get("examples_used"),
+            "visualization": None if error_msg else result.get("visualization"),
             "error": error_msg,
             "timestamp": datetime.utcnow(),
             "is_favorite": False,
@@ -304,7 +307,7 @@ async def chat_stream(websocket: WebSocket):
                 {"type": "status", "message": "Processing question..."}
             )
 
-            async for chunk in graphrag_service.process_question_stream(
+            async for chunk in _get_graphrag_service().process_question_stream(
                 question=question,
                 execute_cypher=message.get("execute_cypher", True),
                 output_mode=message.get("output_mode", "chat"),

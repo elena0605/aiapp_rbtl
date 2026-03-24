@@ -195,7 +195,77 @@ class GraphRAGService:
         self._intent_router = None
         self._visualization_agent = None
         self._discussion_prompt = None
+        self._correction_prompt = None
     
+    async def warmup(self) -> None:
+        """Eagerly load all expensive resources so the first request is fast.
+
+        Runs independent tasks in parallel to minimize total startup time.
+        Schema is loaded from disk cache (ai/schema/schema.txt) when available,
+        making subsequent startups near-instant.
+        """
+        loop = asyncio.get_event_loop()
+        logger.info("Warmup: starting eager resource loading...")
+        t0 = time.perf_counter()
+
+        async def _load_schema():
+            try:
+                await loop.run_in_executor(None, self._get_schema)
+                logger.info("Warmup: schema loaded (%d chars)", len(self._schema_string or ""))
+            except Exception as e:
+                logger.warning("Warmup: schema load failed: %s", e)
+
+        async def _load_terminology():
+            try:
+                await loop.run_in_executor(None, self._get_terminology)
+                logger.info("Warmup: terminology loaded")
+            except Exception as e:
+                logger.warning("Warmup: terminology load failed: %s", e)
+
+        async def _load_prompts():
+            try:
+                await loop.run_in_executor(None, self._get_prompt)
+                logger.info("Warmup: text-to-cypher prompt loaded")
+            except Exception as e:
+                logger.warning("Warmup: text-to-cypher prompt load failed: %s", e)
+
+            try:
+                await loop.run_in_executor(None, self._get_discussion_prompt)
+                logger.info("Warmup: discussion prompt loaded")
+            except Exception as e:
+                logger.warning("Warmup: discussion prompt load failed: %s", e)
+
+            try:
+                await loop.run_in_executor(None, self._get_correction_prompt)
+                logger.info("Warmup: correction prompt loaded")
+            except Exception as e:
+                logger.warning("Warmup: correction prompt load failed: %s", e)
+
+        async def _load_intent_router():
+            try:
+                self._get_intent_router()
+                logger.info("Warmup: intent router initialized")
+            except Exception as e:
+                logger.warning("Warmup: intent router init failed: %s", e)
+
+        async def _load_vector_store():
+            try:
+                await loop.run_in_executor(None, get_vector_store)
+                logger.info("Warmup: vector store initialized")
+            except Exception as e:
+                logger.warning("Warmup: vector store init failed: %s", e)
+
+        await asyncio.gather(
+            _load_schema(),
+            _load_terminology(),
+            _load_prompts(),
+            _load_intent_router(),
+            _load_vector_store(),
+        )
+
+        elapsed = time.perf_counter() - t0
+        logger.info("Warmup: completed in %.1fs", elapsed)
+
     def _get_schema(self) -> str:
         """Get Neo4j schema (cached)."""
         if self._schema_string is None:
@@ -204,6 +274,51 @@ class GraphRAGService:
                 fetch_schema_fn=fetch_schema_from_neo4j,
             )
         return self._schema_string
+
+    def _get_schema_condensed(self, max_chars: int = 3000) -> str:
+        """Return a compact schema listing node labels, properties, and relationships.
+
+        Falls back to a truncated version of the full schema if parsing fails.
+        """
+        full = self._get_schema()
+        try:
+            lines: list[str] = []
+            current_label = ""
+            props: list[str] = []
+            rels: list[str] = []
+
+            for raw_line in full.splitlines():
+                line = raw_line.strip()
+                if not line:
+                    continue
+                low = line.lower()
+                # Detect node/label headers (e.g. "Node: Person", "(:Person)")
+                if low.startswith("node") or (line.startswith("(:") and ")" in line):
+                    if current_label and props:
+                        lines.append(f"{current_label}: {', '.join(props)}")
+                        props = []
+                    current_label = line.split(":")[-1].strip().rstrip(")")
+                elif low.startswith("relationship") or low.startswith("(:") and "-[" in low:
+                    rels.append(line)
+                elif line.startswith("- ") or line.startswith("* "):
+                    prop_name = line.lstrip("-* ").split(":")[0].split("(")[0].strip()
+                    if prop_name:
+                        props.append(prop_name)
+
+            if current_label and props:
+                lines.append(f"{current_label}: {', '.join(props)}")
+
+            if rels:
+                lines.append("")
+                lines.append("Relationships:")
+                lines.extend(rels[:20])
+
+            condensed = "\n".join(lines)
+            if condensed.strip():
+                return condensed[:max_chars]
+        except Exception:
+            pass
+        return full[:max_chars]
     
     def _get_terminology(self) -> str:
         """Get terminology string."""
@@ -287,6 +402,27 @@ class GraphRAGService:
             )
             self._discussion_prompt = self._load_local_prompt("graph.discussion")
         return self._discussion_prompt
+
+    def _get_correction_prompt(self):
+        """Load Cypher correction prompt (Langfuse with local YAML fallback)."""
+        if self._correction_prompt is not None:
+            return self._correction_prompt
+
+        prompt_label = os.environ.get("PROMPT_LABEL")
+        try:
+            self._correction_prompt = get_prompt_from_langfuse(
+                "graph.cypher_correction",
+                langfuse_client=None,
+                label=prompt_label,
+            )
+        except Exception as err:
+            logger.warning(
+                "Langfuse prompt fetch for cypher_correction failed (%s). "
+                "Using local YAML fallback.",
+                err,
+            )
+            self._correction_prompt = self._load_local_prompt("graph.cypher_correction")
+        return self._correction_prompt
 
     def _load_local_prompt(self, prompt_id: str):
         """Load a prompt from local YAML files by id."""
@@ -530,6 +666,46 @@ class GraphRAGService:
             logger.warning("GraphRAG: analytics agent error: %s", e, exc_info=True)
             return None
 
+    def _generate_summary_sync(
+        self,
+        question: str,
+        cypher: str,
+        rows: list,
+        model: str,
+    ) -> str:
+        """Generate a text summary from Cypher results (runs in thread pool)."""
+        try:
+            summary_prompt = get_prompt_from_langfuse(
+                "graph-result-summarizer",
+                label=os.environ.get("PROMPT_LABEL"),
+            )
+        except Exception as err:
+            logger.warning("Langfuse summary prompt fetch failed: %s. Using local YAML.", err)
+            summary_prompt = _load_local_prompt("graph.result_summarizer")
+
+        summary_params = getattr(summary_prompt, "config", None) or {}
+        summary_temp = float(summary_params.get("temperature", 0.0))
+        summary_max_tokens = int(summary_params.get("max_tokens", 1200))
+
+        preview = rows[:10] if isinstance(rows, list) else rows
+        rendered = summary_prompt.compile(
+            question=question,
+            cypher=cypher,
+            results=json.dumps(preview, ensure_ascii=False),
+        )
+
+        logger.info(
+            "GraphRAG: invoking LLM for summary (model=%s, max_tokens=%s, prompt_len=%d chars)",
+            model, summary_max_tokens, len(rendered),
+        )
+        start = time.perf_counter()
+        result = create_completion(
+            rendered, model=model, temperature=summary_temp,
+            max_tokens=summary_max_tokens, langfuse_prompt=summary_prompt,
+        )
+        logger.info("GraphRAG: summary LLM completed in %.2fs", time.perf_counter() - start)
+        return result
+
     async def _handle_visualization(
         self,
         question: str,
@@ -537,7 +713,7 @@ class GraphRAGService:
         output_mode: str,
         history: List[Dict[str, Any]],
     ) -> Optional[Dict[str, Any]]:
-        """Run text-to-cypher, then generate a visualization spec from results.
+        """Run text-to-cypher, then generate summary + visualization spec in parallel.
 
         Returns ``None`` if visualization processing fails so the caller can
         fall back to a plain graph_query.
@@ -547,16 +723,18 @@ class GraphRAGService:
             logger.warning("GraphRAG: visualization agent not available")
             return None
 
-        # Step 1: generate Cypher and get results (reuse the sync pipeline)
         loop = asyncio.get_event_loop()
+
+        # Step 1: generate Cypher and get results (skip summary -- we'll do it in parallel)
         cypher_result = await loop.run_in_executor(
             None,
             partial(
                 self._process_question_sync,
                 question,
                 execute_cypher,
-                "both",  # need raw results for viz
+                "both",
                 conversation_history=history,
+                skip_summary=True,
             ),
         )
 
@@ -568,36 +746,54 @@ class GraphRAGService:
 
         if not results:
             cypher_result["route_type"] = "visualization"
-            cypher_result["visualization"] = {
-                "chart_type": "table",
-                "title": "No Data",
-                "description": "The query returned no results to visualize.",
-                "data": {"columns": [], "rows": []},
-                "summary": "No results found.",
-            }
+            cypher_result["examples_used"] = None
             return cypher_result
 
-        # Step 2: generate the visualization spec via LLM
-        try:
-            viz_spec = viz_agent.generate_spec(question, cypher, results)
-            cypher_result["route_type"] = "visualization"
-            cypher_result["visualization"] = {
-                "chart_type": viz_spec.chart_type,
-                "title": viz_spec.title,
-                "description": viz_spec.description,
-                "data": viz_spec.data,
-                "axes": viz_spec.axes,
-                "summary": viz_spec.summary,
-            }
-            # Use the viz summary as the chat summary if present
-            if viz_spec.summary:
-                cypher_result["summary"] = viz_spec.summary
-            return cypher_result
-        except Exception as e:
-            logger.warning(
-                "GraphRAG: visualization generation failed: %s", e, exc_info=True
-            )
+        model = os.environ.get("OPENAI_MODEL") or os.environ.get("OPEN_AI_MODEL", "gpt-4o")
+
+        # Step 2: run summary + visualization LLM calls in parallel
+        async def _run_summary():
+            try:
+                return await loop.run_in_executor(
+                    None,
+                    partial(self._generate_summary_sync, question, cypher, results, model),
+                )
+            except Exception as e:
+                logger.warning("GraphRAG: parallel summary generation failed: %s", e)
+                return ""
+
+        async def _run_viz():
+            try:
+                return await loop.run_in_executor(
+                    None, partial(viz_agent.generate_spec, question, cypher, results),
+                )
+            except Exception as e:
+                logger.warning("GraphRAG: visualization generation failed: %s", e, exc_info=True)
+                return None
+
+        logger.info("GraphRAG: running summary + visualization in parallel")
+        parallel_start = time.perf_counter()
+        summary_text, viz_spec = await asyncio.gather(_run_summary(), _run_viz())
+        parallel_elapsed = time.perf_counter() - parallel_start
+
+        if viz_spec is None:
             return None
+
+        timings = cypher_result.get("timings") or {}
+        timings["generate_final_response"] = round(parallel_elapsed, 3)
+        cypher_result["timings"] = timings
+
+        cypher_result["route_type"] = "visualization"
+        cypher_result["summary"] = viz_spec.summary or summary_text or ""
+        cypher_result["visualization"] = {
+            "chart_type": viz_spec.chart_type,
+            "title": viz_spec.title,
+            "description": viz_spec.description,
+            "data": viz_spec.data,
+            "axes": viz_spec.axes,
+            "summary": viz_spec.summary,
+        }
+        return cypher_result
 
     @staticmethod
     def _handle_off_topic(
@@ -695,11 +891,16 @@ class GraphRAGService:
             history, max_chars=4000, recent_full=6,
         )
 
+        schema_text = self._get_schema_condensed(max_chars=3000)
+
         rendered = prompt_obj.compile(
             domain_description=DOMAIN_DESCRIPTION,
+            schema=schema_text,
             conversation_history=history_text,
             question=question,
         )
+
+        logger.info("GraphRAG: discussion prompt rendered (%d chars)", len(rendered))
 
         loop = asyncio.get_event_loop()
         model = os.environ.get("OPENAI_MODEL") or os.environ.get("OPEN_AI_MODEL", "gpt-4o")
@@ -711,7 +912,7 @@ class GraphRAGService:
                     rendered,
                     model=model,
                     temperature=0.3,
-                    max_tokens=800,
+                    max_tokens=1200,
                 ),
             )
         except Exception as exc:
@@ -737,12 +938,66 @@ class GraphRAGService:
             "timings": {"discussion_llm": round(elapsed, 3)},
         }
 
+    _MAX_CORRECTION_RETRIES = 2
+
+    def _attempt_cypher_correction(
+        self,
+        question: str,
+        failed_cypher: str,
+        error_feedback: str,
+        feedback_type: str,
+        schema: str,
+        terminology: str,
+        examples: str,
+        model: str,
+        timings: Dict[str, float],
+    ) -> str:
+        """Ask the LLM to correct a failed Cypher query.
+
+        Returns the corrected Cypher string, or empty string on failure.
+        """
+        prompt_obj = self._get_correction_prompt()
+        if prompt_obj is None:
+            logger.warning("GraphRAG: correction prompt not available, cannot retry")
+            return ""
+
+        rendered = prompt_obj.compile(
+            schema=schema,
+            terminology=terminology,
+            examples=examples,
+            question=question,
+            failed_cypher=failed_cypher,
+            error_feedback=error_feedback,
+            feedback_type=feedback_type,
+        )
+
+        correction_start = time.perf_counter()
+        try:
+            corrected = create_completion(
+                rendered,
+                model=model,
+                temperature=0.0,
+                max_tokens=1200,
+            ).strip()
+            elapsed = time.perf_counter() - correction_start
+            prev = timings.get("correction_attempts", 0.0)
+            timings["correction_attempts"] = round(prev + elapsed, 3)
+            logger.info(
+                "GraphRAG: correction LLM returned in %.2fs (length=%d chars)",
+                elapsed, len(corrected),
+            )
+            return corrected
+        except Exception as exc:
+            logger.warning("GraphRAG: correction LLM call failed: %s", exc)
+            return ""
+
     def _process_question_sync(
         self,
         question: str,
         execute_cypher: bool,
         output_mode: str,
         conversation_history: Optional[List[Dict[str, Any]]] = None,
+        skip_summary: bool = False,
     ) -> Dict[str, Any]:
         """Synchronous processing (runs in thread pool)."""
         start_time = time.perf_counter()
@@ -853,154 +1108,280 @@ class GraphRAGService:
         model = os.environ.get("OPENAI_MODEL") or os.environ.get("OPEN_AI_MODEL")
         if not model:
             raise RuntimeError("OPENAI_MODEL not set in .env")
-        
+
         temperature = float(params.get("temperature", 0.0))
         max_tokens = int(params.get("max_tokens", 1200))
-        
-        # Generate Cypher
-        logger.info(
-            "GraphRAG: invoking LLM for Cypher generation (model=%s, temperature=%s, max_tokens=%s)",
-            model,
-            temperature,
-            max_tokens,
-        )
-        llm_start = time.perf_counter()
-        try:
-            cypher = create_completion(
-                rendered,
-                model=model,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                langfuse_prompt=prompt,
-            ).strip()
-            timings["generate_cypher"] = time.perf_counter() - llm_start
-            logger.info(
-                "GraphRAG: LLM returned Cypher in %.2fs (length=%s chars)",
-                time.perf_counter() - llm_start,
-                len(cypher),
-            )
-        except Exception as exc:
-            logger.exception("GraphRAG: LLM call for Cypher failed: %s", exc)
-            raise
-        
+
         result = {
             "question": question,
-            "route_type": "cypher",  # Indicate this used Cypher
-            "cypher": cypher,
+            "route_type": "cypher",
+            "cypher": None,
             "results": None,
             "summary": None,
             "examples_used": examples_used if examples_used else None,
             "timings": timings,
         }
-        
-        # Check if query is empty (LLM might have refused to generate write query or semantically invalid query)
-        if not cypher or not cypher.strip():
-            logger.warning("GraphRAG: LLM returned empty Cypher query - may have refused to generate write operation or query references non-existent schema elements")
-            error_message = "Cannot generate query for this request. The question may reference concepts that don't exist in the database schema, or it may require write operations which are not allowed. Only read-only queries that match the schema are supported."
-            result["error"] = error_message
-            result["summary"] = None  # Explicitly set summary to None when there's an error
-            result["cypher"] = None
-            logger.info(f"GraphRAG: Returning error response: {error_message}")
-            return result
-        
-        # Validate query before execution (includes read-only check)
-        # This validation happens even if we don't execute, to catch any write operations
-        logger.info("GraphRAG: validating Cypher query")
-        try:
-            is_valid, validation_details = validate_cypher(cypher, strict=True, enforce_read_only=True)
-            if not is_valid:
-                raise CypherValidationError(
-                    "Cypher query validation failed",
-                    validation_details
+
+        correction_history: List[Dict[str, str]] = []
+        cypher = ""
+        rows: List[Dict[str, Any]] = []
+        max_attempts = 1 + self._MAX_CORRECTION_RETRIES
+
+        for attempt in range(max_attempts):
+            # ── Generate Cypher ──────────────────────────────────────
+            if attempt == 0:
+                logger.info(
+                    "GraphRAG: invoking LLM for Cypher generation "
+                    "(model=%s, temperature=%s, max_tokens=%s)",
+                    model, temperature, max_tokens,
                 )
-            logger.info("GraphRAG: Cypher query validation passed")
-        except (CypherValidationError, ReadOnlyViolationError) as ve:
-            logger.error(
-                "GraphRAG: Cypher validation failed: %s (details: %s)",
-                ve,
-                ve.validation_details
-            )
-            error_msg = str(ve)
-            if isinstance(ve, ReadOnlyViolationError):
-                error_msg = f"Read-only violation: {error_msg}"
-            result["error"] = error_msg
-            result["validation_details"] = ve.validation_details
-            result["cypher"] = cypher  # Include the generated query in response for debugging
-            return result
-        except Exception as e:
-            # If validation is unavailable (e.g., CyVer not installed), log warning but continue
-            logger.warning("GraphRAG: Cypher validation skipped: %s", e)
-        
-        # Execute Cypher if requested (validation already done above)
-        if execute_cypher and cypher:
+                llm_start = time.perf_counter()
+                try:
+                    cypher = create_completion(
+                        rendered,
+                        model=model,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        langfuse_prompt=prompt,
+                    ).strip()
+                    timings["generate_cypher"] = time.perf_counter() - llm_start
+                    logger.info(
+                        "GraphRAG: LLM returned Cypher in %.2fs (length=%s chars)",
+                        time.perf_counter() - llm_start, len(cypher),
+                    )
+                except Exception as exc:
+                    logger.exception("GraphRAG: LLM call for Cypher failed: %s", exc)
+                    raise
+            else:
+                prev = correction_history[-1]
+                logger.info(
+                    "GraphRAG: retry %d/%d (reason=%s)",
+                    attempt, self._MAX_CORRECTION_RETRIES, prev["feedback_type"],
+                )
+                cypher = self._attempt_cypher_correction(
+                    question=question,
+                    failed_cypher=prev["cypher"],
+                    error_feedback=prev["error"],
+                    feedback_type=prev["feedback_type"],
+                    schema=schema_string,
+                    terminology=terminology_str,
+                    examples=examples_str,
+                    model=model,
+                    timings=timings,
+                )
+
+            # ── Empty Cypher — don't retry ───────────────────────────
+            if not cypher or not cypher.strip():
+                if attempt == 0:
+                    logger.warning(
+                        "GraphRAG: LLM returned empty Cypher query"
+                    )
+                    result["error"] = (
+                        "Cannot generate query for this request. The question "
+                        "may reference concepts that don't exist in the database "
+                        "schema, or it may require write operations which are not "
+                        "allowed. Only read-only queries that match the schema "
+                        "are supported."
+                    )
+                else:
+                    logger.warning("GraphRAG: correction returned empty Cypher")
+                    last = correction_history[-1]
+                    if last.get("feedback_type") == "empty_results":
+                        result["cypher"] = last["cypher"]
+                        result["results"] = []
+                        result["examples_used"] = None
+                        result["summary"] = (
+                            "No matching data was found for this query. "
+                            "The query is valid, but there are no records "
+                            "in the database that match these criteria. "
+                            "Try broadening your search or asking about a "
+                            "different area, topic, or filter."
+                        )
+                        timings = {k: v for k, v in timings.items() if v}
+                        result["timings"] = timings
+                    else:
+                        result["error"] = last["error"]
+                        result["cypher"] = last["cypher"]
+                break
+
+            result["cypher"] = cypher
+
+            # ── Validate ─────────────────────────────────────────────
+            validation_failed = False
+            logger.info("GraphRAG: validating Cypher query (attempt %d)", attempt + 1)
+            try:
+                is_valid, validation_details = validate_cypher(
+                    cypher, strict=True, enforce_read_only=True,
+                )
+                if not is_valid:
+                    raise CypherValidationError(
+                        "Cypher query validation failed", validation_details,
+                    )
+                logger.info("GraphRAG: Cypher query validation passed")
+            except ReadOnlyViolationError as ve:
+                logger.error("GraphRAG: read-only violation: %s", ve)
+                result["error"] = f"Read-only violation: {ve}"
+                result["validation_details"] = ve.validation_details
+                break
+            except CypherValidationError as ve:
+                logger.error(
+                    "GraphRAG: Cypher validation failed: %s (details: %s)",
+                    ve, ve.validation_details,
+                )
+                if attempt < max_attempts - 1:
+                    error_detail = str(ve)
+                    if ve.validation_details:
+                        details_list = ve.validation_details.get("details", [])
+                        if details_list:
+                            error_detail = "; ".join(
+                                d.get("description", str(d)) for d in details_list
+                            )
+                    correction_history.append({
+                        "cypher": cypher,
+                        "error": f"Syntax validation error: {error_detail}",
+                        "feedback_type": "syntax_error",
+                    })
+                    validation_failed = True
+                else:
+                    result["error"] = str(ve)
+                    result["validation_details"] = ve.validation_details
+                    break
+            except Exception as e:
+                logger.warning("GraphRAG: Cypher validation skipped: %s", e)
+
+            if validation_failed:
+                continue
+
+            # ── Execute ──────────────────────────────────────────────
+            if not execute_cypher:
+                break
+
             try:
                 logger.info("GraphRAG: executing Cypher against Neo4j")
                 with get_session() as session:
                     query_start = time.perf_counter()
                     query_result = session.run(cypher)
                     rows = [record.data() for record in query_result]
-                    # Convert Neo4j temporal types to strings for JSON serialization
                     rows = [_convert_neo4j_temporal_to_string(row) for row in rows]
                     timings["query_knowledge_base"] = time.perf_counter() - query_start
                     logger.info(
                         "GraphRAG: Cypher execution completed in %.2fs (%s rows)",
-                        time.perf_counter() - query_start,
-                        len(rows),
+                        time.perf_counter() - query_start, len(rows),
                     )
-                    
-                    if output_mode in {"json", "both"}:
-                        result["results"] = rows
-                    
-                    if output_mode in {"chat", "both"}:
-                        # Generate summary
-                        try:
-                            summary_prompt = get_prompt_from_langfuse(
-                                "graph-result-summarizer",
-                                label=os.environ.get("PROMPT_LABEL"),
-                            )
-                        except Exception as err:
-                            print(
-                                f"Langfuse summary prompt fetch failed ({err}). "
-                                "Using local YAML fallback.",
-                                file=sys.stderr,
-                            )
-                            summary_prompt = _load_local_prompt("graph.result_summarizer")
-                        summary_params = getattr(summary_prompt, "config", None) or {}
-                        summary_temp = float(summary_params.get("temperature", 0.0))
-                        summary_max_tokens = int(summary_params.get("max_tokens", 1200))
-                        
-                        preview = rows[:10] if isinstance(rows, list) else rows
-                        summary_rendered = summary_prompt.compile(
-                            question=question,
-                            cypher=cypher,
-                            results=json.dumps(preview, ensure_ascii=False),
-                        )
-                        
-                        logger.info(
-                            "GraphRAG: invoking LLM for summary (model=%s, max_tokens=%s)",
-                            model,
-                            summary_max_tokens,
-                        )
-                        summary_start = time.perf_counter()
-                        result["summary"] = create_completion(
-                            summary_rendered,
-                            model=model,
-                            temperature=summary_temp,
-                            max_tokens=summary_max_tokens,
-                            langfuse_prompt=summary_prompt,
-                        )
-                        timings["generate_final_response"] = time.perf_counter() - summary_start
-                        logger.info(
-                            "GraphRAG: summary LLM completed in %.2fs",
-                            time.perf_counter() - summary_start,
-                        )
             except Exception as e:
+                logger.exception("GraphRAG: error executing Cypher: %s", e)
+                if attempt < max_attempts - 1:
+                    correction_history.append({
+                        "cypher": cypher,
+                        "error": f"Neo4j execution error: {e}",
+                        "feedback_type": "syntax_error",
+                    })
+                    continue
                 result["error"] = str(e)
-                logger.exception("GraphRAG: error executing Cypher or summarizing: %s", e)
-        
+                break
+
+            # ── Empty results — retry if attempts remain ─────────────
+            if len(rows) == 0 and attempt < max_attempts - 1:
+                logger.info(
+                    "GraphRAG: query returned 0 rows, attempting correction "
+                    "(attempt %d/%d)",
+                    attempt + 1, self._MAX_CORRECTION_RETRIES,
+                )
+                correction_history.append({
+                    "cypher": cypher,
+                    "error": (
+                        "Query returned 0 rows. The property values or filters "
+                        "may not match actual data in the database. Check the "
+                        "terminology mapping for correct canonical values "
+                        "(exact casing and spelling)."
+                    ),
+                    "feedback_type": "empty_results",
+                })
+                continue
+
+            # ── All retries exhausted with 0 rows — data doesn't exist
+            if len(rows) == 0:
+                logger.info(
+                    "GraphRAG: query returned 0 rows after %d attempts; "
+                    "treating as genuine no-data",
+                    attempt + 1,
+                )
+                result["cypher"] = cypher
+                result["results"] = []
+                result["examples_used"] = None
+                result["summary"] = (
+                    "No matching data was found for this query. "
+                    "The query is valid, but there are no records in the "
+                    "database that match these criteria. "
+                    "Try broadening your search or asking about a "
+                    "different area, topic, or filter."
+                )
+                timings = {k: v for k, v in timings.items() if v}
+                result["timings"] = timings
+                break
+
+            # ── Success: summarize results ───────────────────────────
+            break
+
+        # ── Post-loop: populate results and summary ──────────────────
+        if correction_history:
+            result["correction_history"] = correction_history
+            result["retry_count"] = len(correction_history)
+
+        if not result.get("error") and execute_cypher and cypher and rows is not None:
+            if output_mode in {"json", "both"}:
+                result["results"] = rows
+
+            if output_mode in {"chat", "both"} and not skip_summary:
+                try:
+                    summary_prompt = get_prompt_from_langfuse(
+                        "graph-result-summarizer",
+                        label=os.environ.get("PROMPT_LABEL"),
+                    )
+                except Exception as err:
+                    print(
+                        f"Langfuse summary prompt fetch failed ({err}). "
+                        "Using local YAML fallback.",
+                        file=sys.stderr,
+                    )
+                    summary_prompt = _load_local_prompt("graph.result_summarizer")
+                summary_params = getattr(summary_prompt, "config", None) or {}
+                summary_temp = float(summary_params.get("temperature", 0.0))
+                summary_max_tokens = int(summary_params.get("max_tokens", 1200))
+
+                preview = rows[:10] if isinstance(rows, list) else rows
+                summary_rendered = summary_prompt.compile(
+                    question=question,
+                    cypher=cypher,
+                    results=json.dumps(preview, ensure_ascii=False),
+                )
+
+                logger.info(
+                    "GraphRAG: invoking LLM for summary (model=%s, max_tokens=%s, prompt_len=%d chars)",
+                    model, summary_max_tokens, len(summary_rendered),
+                )
+                summary_start = time.perf_counter()
+                try:
+                    result["summary"] = create_completion(
+                        summary_rendered,
+                        model=model,
+                        temperature=summary_temp,
+                        max_tokens=summary_max_tokens,
+                        langfuse_prompt=summary_prompt,
+                    )
+                except Exception as e:
+                    result["error"] = str(e)
+                    logger.exception("GraphRAG: error generating summary: %s", e)
+                timings["generate_final_response"] = time.perf_counter() - summary_start
+                logger.info(
+                    "GraphRAG: summary LLM completed in %.2fs",
+                    time.perf_counter() - summary_start,
+                )
+
         logger.info(
-            "GraphRAG: finished processing question in %.2fs",
+            "GraphRAG: finished processing question in %.2fs (retries=%d)",
             time.perf_counter() - start_time,
+            len(correction_history),
         )
         return result
     

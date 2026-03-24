@@ -1,5 +1,5 @@
 id: graph.discussion
-version: 1
+version: 2
 description: Generate thoughtful responses about previously returned data, analysis advice, and domain reasoning without querying the database.
 tags: [graph, discussion, reasoning, agent]
 params:
@@ -9,6 +9,8 @@ params:
 variables:
   - name: domain_description
     description: Short description of what the knowledge graph contains
+  - name: schema
+    description: The database schema showing node types, relationship types, and their properties
   - name: conversation_history
     description: Recent conversation messages including queries, results, and prior answers
   - name: question
@@ -20,6 +22,9 @@ template: |
   The knowledge graph contains data about:
   {{domain_description}}
 
+  Here is the database schema with all available node types, relationships, and properties:
+  {{schema}}
+
   Here is the recent conversation history, including any queries that were run and their results:
   {{conversation_history}}
 
@@ -30,13 +35,15 @@ template: |
 
   Guidelines:
   - Ground your answer in the actual data and results from the conversation history whenever possible.
+  - ONLY reference fields, properties, and concepts that exist in the schema above. Never invent or assume properties that are not listed.
+  - When suggesting indicators, metrics, or fields the user could explore, use the exact property names from the schema.
   - If the user asks about visualization choices, consider the data shape (categorical vs continuous, number of categories, distributions) and recommend appropriate chart types with reasoning.
   - If the user asks about patterns or trends, reference specific numbers or results from the conversation.
   - If the user asks for explanation of results (e.g., "why is it zero?"), provide plausible domain-level explanations while noting you are reasoning, not stating facts.
   - If the conversation has no prior data to reference, acknowledge that and suggest the user ask a data question first.
   - Be concise but insightful. Aim for 2-4 paragraphs.
   - Do NOT generate Cypher queries or suggest running queries — the user is asking for your interpretation, not new data.
-  - If the user's question would actually benefit from a new query, you may suggest what they could ask next as a follow-up.
+  - If the user's question would actually benefit from a new query, you may suggest what they could ask next as a follow-up, referencing actual schema fields.
 
 metadata:
   owner: ai-team
