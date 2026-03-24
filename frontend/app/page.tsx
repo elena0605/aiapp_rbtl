@@ -74,30 +74,26 @@ export default function Home() {
   }
 
   return (
-    <main className="flex h-screen bg-gray-50 overflow-hidden">
-      {/* Sidebar (1/4 of screen) */}
+    <main className="flex h-screen bg-slate-50 overflow-hidden">
       <Sidebar
         activeOption={activeOption}
         onOptionChange={setActiveOption}
         loggedInUser={authenticatedUser}
         onLogout={handleLogout}
       />
-      
-      {/* Main Content Area (3/4 of screen) */}
+
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {activeOption === 'chat' && (
-          <div className="flex-1 flex flex-col p-6 min-h-0 overflow-hidden">
-            <div className="flex-1 min-h-0 overflow-hidden">
-              <ChatInterface
-                selectedUser={authenticatedUser}
-                isUserSelectionReady={!!authenticatedUser}
-                userLoadError={null}
-                onProcessingChange={setIsChatProcessing}
-              />
-            </div>
+          <div className="flex-1 flex flex-col min-h-0 overflow-hidden p-6">
+            <ChatInterface
+              selectedUser={authenticatedUser}
+              isUserSelectionReady={!!authenticatedUser}
+              userLoadError={null}
+              onProcessingChange={setIsChatProcessing}
+            />
           </div>
         )}
-        
+
         {activeOption === 'knowledge-base' && (
           <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
             <KnowledgeBase selectedTester={authenticatedUser} />
@@ -105,7 +101,7 @@ export default function Home() {
         )}
 
         {activeOption === 'favorites' && (
-          <div className="flex-1 flex flex-col p-6 min-h-0 overflow-hidden">
+          <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
             <FavoritesView
               selectedUser={authenticatedUser}
               isUserSelectionReady={!!authenticatedUser}
@@ -118,14 +114,17 @@ export default function Home() {
             <GraphInfo />
           </div>
         )}
-        
-        {/* Future: Add other views here based on activeOption */}
+
         {activeOption !== 'chat' &&
           activeOption !== 'knowledge-base' &&
           activeOption !== 'favorites' &&
           activeOption !== 'graph-info' && (
-          <div className="flex-1 flex items-center justify-center">
-            <p className="text-gray-500">Coming soon...</p>
+          <div className="flex-1 flex flex-col items-center justify-center bg-slate-50/50">
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center mb-4 shadow-lg shadow-indigo-200/50">
+              <span className="text-white text-xl font-bold">?</span>
+            </div>
+            <p className="text-gray-700 font-medium">Coming soon</p>
+            <p className="text-sm text-gray-400 mt-1">This feature is under development.</p>
           </div>
         )}
       </div>

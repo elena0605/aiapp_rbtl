@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { BookmarkMinus } from 'lucide-react'
+import { BookmarkMinus, Star, Users, AlertCircle, RefreshCw } from 'lucide-react'
+import CypherViewer from './CypherViewer'
 import {
   fetchFavorites,
   toggleFavoriteMessage,
@@ -22,28 +23,30 @@ export default function FavoritesView({
   const [error, setError] = useState<string | null>(null)
   const [removingId, setRemovingId] = useState<string | null>(null)
 
-  useEffect(() => {
-    const loadFavorites = async () => {
-      if (!selectedUser || !isUserSelectionReady) {
-        setFavorites(null)
-        return
-      }
-      setLoading(true)
-      setError(null)
-      try {
-        const data = await fetchFavorites(selectedUser)
-        setFavorites(data)
-      } catch (err) {
-        setError(
-          `Unable to load favorites${
-            err instanceof Error ? `: ${err.message}` : ''
-          }`
-        )
-      } finally {
-        setLoading(false)
-      }
+  const loadFavorites = async () => {
+    if (!selectedUser || !isUserSelectionReady) {
+      setFavorites(null)
+      return
     }
+    setLoading(true)
+    setError(null)
+    try {
+      const data = await fetchFavorites(selectedUser)
+      setFavorites(data)
+    } catch (err) {
+      setError(
+        `Unable to load favorites${
+          err instanceof Error ? `: ${err.message}` : ''
+        }`
+      )
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
     loadFavorites()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedUser, isUserSelectionReady])
 
   const handleRemove = async (messageId: string) => {
@@ -74,25 +77,43 @@ export default function FavoritesView({
 
   if (!selectedUser) {
     return (
-      <div className="flex h-full items-center justify-center text-gray-500">
-        Select a tester account from the sidebar to view favorites.
+      <div className="flex h-full flex-col items-center justify-center bg-slate-50/50 px-6">
+        <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center mb-4 shadow-lg shadow-indigo-200/50">
+          <Users size={24} className="text-white" />
+        </div>
+        <p className="text-gray-700 font-medium text-center">No account selected</p>
+        <p className="text-sm text-gray-400 mt-1.5 text-center max-w-xs">
+          Select a tester account from the sidebar to view saved favorites.
+        </p>
       </div>
     )
   }
 
   if (loading) {
     return (
-      <div className="flex h-full flex-col items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mb-4"></div>
-        <p className="text-gray-600">Loading favorites...</p>
+      <div className="flex h-full flex-col items-center justify-center bg-slate-50/50">
+        <div className="animate-spin rounded-full h-8 w-8 border-2 border-indigo-200 border-t-indigo-500 mb-4"></div>
+        <p className="text-gray-500 text-sm">Loading favorites&hellip;</p>
       </div>
     )
   }
 
   if (error) {
     return (
-      <div className="flex h-full flex-col items-center justify-center text-red-600">
-        <p className="mb-2">{error}</p>
+      <div className="flex h-full flex-col items-center justify-center bg-slate-50/50 px-6">
+        <div className="bg-rose-50 border border-rose-100 rounded-2xl p-6 max-w-md text-center">
+          <div className="w-12 h-12 rounded-xl bg-rose-100 flex items-center justify-center mx-auto mb-3">
+            <AlertCircle size={22} className="text-rose-500" />
+          </div>
+          <p className="text-rose-700 text-sm font-medium mb-4">{error}</p>
+          <button
+            onClick={loadFavorites}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-500 text-white text-sm font-medium rounded-xl hover:bg-indigo-600 transition-colors shadow-sm"
+          >
+            <RefreshCw size={15} />
+            Retry
+          </button>
+        </div>
       </div>
     )
   }
@@ -101,58 +122,64 @@ export default function FavoritesView({
 
   if (favItems.length === 0) {
     return (
-      <div className="flex h-full flex-col items-center justify-center text-gray-500">
-        <BookmarkMinus className="mb-3" size={32} />
-        <p>No favorites yet.</p>
-        <p className="text-sm mt-1">
-          Mark interesting assistant responses as favorites to see them here.
+      <div className="flex h-full flex-col items-center justify-center bg-slate-50/50 px-6">
+        <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center mb-4 shadow-lg shadow-indigo-200/50">
+          <BookmarkMinus size={24} className="text-white" />
+        </div>
+        <p className="text-gray-700 font-medium">No favorites yet</p>
+        <p className="text-sm text-gray-400 mt-1.5 text-center max-w-xs">
+          Mark interesting assistant responses as favorites to collect them here.
         </p>
       </div>
     )
   }
 
   return (
-    <div className="flex h-full flex-col p-6 overflow-hidden">
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">Favorites</h1>
-        <p className="text-gray-600">
-          Saved user questions and assistant responses for {selectedUser}.
+    <div className="flex h-full flex-col p-6 md:p-8 overflow-hidden bg-slate-50/30">
+      <div className="mb-8 flex-shrink-0">
+        <p className="text-xs font-semibold uppercase tracking-wider text-indigo-500 mb-1">Saved</p>
+        <h1 className="text-3xl font-bold text-gray-900 tracking-tight mb-2">Favorites</h1>
+        <p className="text-gray-500 max-w-xl leading-relaxed">
+          Saved questions and assistant responses for {selectedUser}.
         </p>
       </div>
 
-      <div className="flex-1 overflow-y-auto space-y-4">
+      <div className="flex-1 overflow-y-auto space-y-4 pr-1">
         {favItems.map((fav) => (
           <div
             key={fav.message.id}
-            className="border border-gray-200 rounded-lg bg-white shadow-sm p-4 space-y-3"
+            className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm hover:shadow-md hover:border-indigo-100/80 transition-all duration-300 group"
           >
             {fav.question && (
-              <div>
-                <div className="text-sm font-semibold text-gray-700 mb-1">
+              <div className="mb-3">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-indigo-500 mb-1.5">
                   Question
                 </div>
-                <p className="text-gray-900 whitespace-pre-wrap">
+                <p className="text-gray-800 text-sm leading-relaxed whitespace-pre-wrap">
                   {fav.question}
                 </p>
               </div>
             )}
-            <div>
-              <div className="text-sm font-semibold text-gray-700 mb-1">
+
+            <div className="mb-2">
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-600 mb-1.5">
                 Assistant Response
               </div>
-              <p className="text-gray-900 whitespace-pre-wrap">
+              <p className="text-gray-800 text-sm leading-relaxed whitespace-pre-wrap">
                 {fav.message.content}
               </p>
             </div>
+
             {fav.message.cypher && (
-              <div className="text-xs text-gray-500">
-                <span className="font-semibold">Cypher:</span>{' '}
-                <code>{fav.message.cypher}</code>
+              <div className="mt-3">
+                <CypherViewer cypher={fav.message.cypher} />
               </div>
             )}
-            <div className="flex justify-between items-center text-xs text-gray-500">
-              <span>
-                Saved:{' '}
+
+            <div className="flex justify-between items-center text-xs text-gray-400 mt-3 pt-3 border-t border-gray-100">
+              <span className="flex items-center gap-1.5">
+                <Star size={12} className="text-amber-400 fill-amber-400" />
+                Saved{' '}
                 {new Date(fav.message.timestamp).toLocaleString(undefined, {
                   dateStyle: 'medium',
                   timeStyle: 'short',
@@ -160,10 +187,20 @@ export default function FavoritesView({
               </span>
               <button
                 onClick={() => handleRemove(fav.message.id)}
-                className="text-red-500 hover:text-red-600 text-sm font-medium"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-rose-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 disabled={removingId === fav.message.id}
               >
-                {removingId === fav.message.id ? 'Removing...' : 'Remove'}
+                {removingId === fav.message.id ? (
+                  <>
+                    <div className="animate-spin rounded-full h-3.5 w-3.5 border-2 border-rose-200 border-t-rose-500"></div>
+                    Removing&hellip;
+                  </>
+                ) : (
+                  <>
+                    <BookmarkMinus size={14} />
+                    Remove
+                  </>
+                )}
               </button>
             </div>
           </div>
@@ -172,4 +209,3 @@ export default function FavoritesView({
     </div>
   )
 }
-

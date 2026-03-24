@@ -10,8 +10,8 @@ interface CypherViewerProps {
 export default function CypherViewer({ cypher }: CypherViewerProps) {
   return (
     <div className="mt-2 max-w-full">
-      <div className="text-xs font-semibold mb-1">Generated Cypher:</div>
-      <div className="rounded overflow-hidden border border-gray-300 max-w-full">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-indigo-500 mb-1.5">Cypher</div>
+      <div className="rounded-xl overflow-hidden border border-gray-200 max-w-full shadow-inner bg-slate-900/5">
         <div className="overflow-x-auto">
           <SyntaxHighlighter
             language="cypher"

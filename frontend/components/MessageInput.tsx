@@ -26,27 +26,26 @@ export default function MessageInput({ onSendMessage, disabled }: MessageInputPr
   }
 
   return (
-    <div className="border-t border-gray-300 p-4 bg-gray-50">
-      <div className="flex space-x-2">
+    <div className="border-t border-gray-200 p-4 bg-white/80 backdrop-blur-sm">
+      <div className="flex items-end gap-3">
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyPress={handleKeyPress}
           placeholder="Ask a question about your data..."
-          className="flex-1 resize-none border border-gray-300 rounded-lg px-4 py-2 text-black focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="flex-1 resize-none border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-900 bg-gray-50/50 focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 focus:bg-white placeholder:text-gray-400 transition-all"
           rows={2}
           disabled={disabled}
         />
         <button
           onClick={handleSend}
           disabled={disabled || !input.trim()}
-          className="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center space-x-2"
+          className="px-5 py-3 bg-indigo-500 text-white rounded-xl hover:bg-indigo-600 disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed flex items-center gap-2 font-medium text-sm transition-all duration-200 shadow-sm hover:shadow-md hover:shadow-indigo-200/50 active:scale-[0.98]"
         >
-          <Send size={20} />
+          <Send size={16} />
           <span>Send</span>
         </button>
       </div>
     </div>
   )
 }
-

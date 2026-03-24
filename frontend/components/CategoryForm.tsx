@@ -45,12 +45,12 @@ export default function CategoryForm({
   }
 
   return (
-    <div className="bg-white border border-gray-300 rounded-lg p-6 shadow-md">
-      <div className="flex items-center justify-between mb-4">
+    <div className="bg-white border border-gray-100 rounded-2xl p-6 md:p-7 shadow-lg shadow-indigo-100/40 ring-1 ring-indigo-50">
+      <div className="flex items-center justify-between mb-5">
         <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
         <button
           onClick={onCancel}
-          className="p-1 hover:bg-gray-200 rounded transition-colors"
+          className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
           aria-label="Close"
         >
           <X size={20} />
@@ -59,15 +59,15 @@ export default function CategoryForm({
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label htmlFor="categoryName" className="block text-sm font-medium text-gray-700 mb-1">
-            Category Name
+          <label htmlFor="categoryName" className="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
+            Category name
           </label>
           <input
             id="categoryName"
             type="text"
             value={categoryName}
             onChange={(e) => setCategoryName(e.target.value)}
-            className="w-full border border-gray-300 rounded-lg px-4 py-2 text-black focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 bg-gray-50/50 focus:bg-white transition-all"
             placeholder="e.g., Content exposure by theme and topic"
             required
             disabled={isSubmitting}
@@ -75,38 +75,38 @@ export default function CategoryForm({
         </div>
 
         <div>
-          <label htmlFor="categoryDescription" className="block text-sm font-medium text-gray-700 mb-1">
+          <label htmlFor="categoryDescription" className="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
             Description
           </label>
           <textarea
             id="categoryDescription"
             value={categoryDescription}
             onChange={(e) => setCategoryDescription(e.target.value)}
-            className="w-full border border-gray-300 rounded-lg px-4 py-2 text-black focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-gray-900 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 bg-gray-50/50 focus:bg-white transition-all resize-y min-h-[100px]"
             rows={4}
-            placeholder="Describe what types of queries belong in this category..."
+            placeholder="Describe what types of queries belong in this category…"
             required
             disabled={isSubmitting}
           />
         </div>
 
         {error && (
-          <div className="text-red-600 text-sm">{error}</div>
+          <div className="text-rose-600 text-sm bg-rose-50 border border-rose-100 rounded-lg px-3 py-2">{error}</div>
         )}
 
-        <div className="flex space-x-3">
+        <div className="flex flex-wrap gap-3 pt-1">
           <button
             type="submit"
             disabled={isSubmitting}
-            className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+            className="px-5 py-2.5 bg-indigo-500 text-white text-sm font-medium rounded-xl hover:bg-indigo-600 disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed transition-all shadow-sm hover:shadow"
           >
-            {isSubmitting ? 'Saving...' : 'Save Category'}
+            {isSubmitting ? 'Saving…' : 'Save category'}
           </button>
           <button
             type="button"
             onClick={onCancel}
             disabled={isSubmitting}
-            className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 disabled:bg-gray-100 disabled:cursor-not-allowed transition-colors"
+            className="px-5 py-2.5 bg-gray-100 text-gray-700 text-sm font-medium rounded-xl hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             Cancel
           </button>
@@ -115,4 +115,3 @@ export default function CategoryForm({
     </div>
   )
 }
-

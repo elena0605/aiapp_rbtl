@@ -475,7 +475,7 @@ export default function ChatInterface({
   }
 
   return (
-    <div className="flex flex-col h-full border border-gray-300 rounded-lg shadow-lg bg-white overflow-hidden">
+    <div className="flex flex-col h-full border border-gray-200 rounded-2xl shadow-sm bg-white/80 backdrop-blur-sm overflow-hidden">
       {historyError && (
         <div className="bg-red-50 border-b border-red-200 text-red-700 text-sm px-4 py-2">
           {historyError}
@@ -491,7 +491,7 @@ export default function ChatInterface({
           onSubmitFeedback={handleSubmitFeedback}
         />
         {isLoading && (
-          <div className="w-full max-w-md bg-gray-50 border border-gray-200 rounded-lg p-4 space-y-3 text-sm text-gray-600">
+          <div className="w-full max-w-md bg-white border border-gray-100 rounded-2xl p-5 space-y-3 text-sm text-gray-600 shadow-sm">
             <div className="flex items-center space-x-2 font-medium text-gray-700">
               <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-700"></div>
               <span>Processing your question...</span>

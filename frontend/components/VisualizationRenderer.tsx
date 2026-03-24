@@ -17,8 +17,8 @@ import {
 } from 'recharts'
 
 const COLORS = [
-  '#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6',
-  '#ec4899', '#06b6d4', '#84cc16', '#f97316', '#6366f1',
+  '#6366f1', '#0ea5e9', '#14b8a6', '#f59e0b', '#f43f5e',
+  '#8b5cf6', '#06b6d4', '#84cc16', '#fb923c', '#e879f9',
 ]
 
 export interface VisualizationData {
@@ -44,6 +44,22 @@ function buildRechartsData(labels: string[], datasets: { label: string; data: nu
   })
 }
 
+const CustomTooltip = ({ active, payload, label }: any) => {
+  if (!active || !payload?.length) return null
+  return (
+    <div className="bg-gray-900 text-white text-xs rounded-lg px-3 py-2 shadow-xl border border-gray-700">
+      <p className="font-medium mb-1">{label}</p>
+      {payload.map((entry: any, i: number) => (
+        <p key={i} className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: entry.color }} />
+          <span className="text-gray-300">{entry.name}:</span>
+          <span className="font-semibold">{typeof entry.value === 'number' ? entry.value.toLocaleString() : entry.value}</span>
+        </p>
+      ))}
+    </div>
+  )
+}
+
 function BarChartView({ visualization }: { visualization: VisualizationData }) {
   const { labels = [], datasets = [] } = visualization.data || {}
   if (!labels.length || !datasets.length) return <EmptyState />
@@ -51,14 +67,14 @@ function BarChartView({ visualization }: { visualization: VisualizationData }) {
 
   return (
     <ResponsiveContainer width="100%" height={320}>
-      <BarChart data={chartData} margin={{ top: 5, right: 20, bottom: 5, left: 10 }}>
-        <CartesianGrid strokeDasharray="3 3" />
-        <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-30} textAnchor="end" height={70} />
-        <YAxis tick={{ fontSize: 11 }} />
-        <Tooltip />
-        {datasets.length > 1 && <Legend />}
+      <BarChart data={chartData} margin={{ top: 10, right: 20, bottom: 5, left: 10 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
+        <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#6b7280' }} interval={0} angle={-30} textAnchor="end" height={70} axisLine={{ stroke: '#d1d5db' }} tickLine={false} />
+        <YAxis tick={{ fontSize: 11, fill: '#6b7280' }} axisLine={false} tickLine={false} />
+        <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(99, 102, 241, 0.08)' }} />
+        {datasets.length > 1 && <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12 }} />}
         {datasets.map((ds: any, i: number) => (
-          <Bar key={ds.label} dataKey={ds.label} fill={COLORS[i % COLORS.length]} />
+          <Bar key={ds.label} dataKey={ds.label} fill={COLORS[i % COLORS.length]} radius={[4, 4, 0, 0]} />
         ))}
       </BarChart>
     </ResponsiveContainer>
@@ -71,15 +87,15 @@ function HorizontalBarChartView({ visualization }: { visualization: Visualizatio
   const chartData = buildRechartsData(labels, datasets)
 
   return (
-    <ResponsiveContainer width="100%" height={Math.max(320, labels.length * 32)}>
-      <BarChart data={chartData} layout="vertical" margin={{ top: 5, right: 20, bottom: 5, left: 80 }}>
-        <CartesianGrid strokeDasharray="3 3" />
-        <XAxis type="number" tick={{ fontSize: 11 }} />
-        <YAxis dataKey="name" type="category" tick={{ fontSize: 11 }} width={75} />
-        <Tooltip />
-        {datasets.length > 1 && <Legend />}
+    <ResponsiveContainer width="100%" height={Math.max(320, labels.length * 36)}>
+      <BarChart data={chartData} layout="vertical" margin={{ top: 10, right: 20, bottom: 5, left: 100 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" horizontal={false} />
+        <XAxis type="number" tick={{ fontSize: 11, fill: '#6b7280' }} axisLine={{ stroke: '#d1d5db' }} tickLine={false} />
+        <YAxis dataKey="name" type="category" tick={{ fontSize: 11, fill: '#374151' }} width={95} axisLine={false} tickLine={false} />
+        <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(99, 102, 241, 0.08)' }} />
+        {datasets.length > 1 && <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12 }} />}
         {datasets.map((ds: any, i: number) => (
-          <Bar key={ds.label} dataKey={ds.label} fill={COLORS[i % COLORS.length]} />
+          <Bar key={ds.label} dataKey={ds.label} fill={COLORS[i % COLORS.length]} radius={[0, 4, 4, 0]} barSize={20} />
         ))}
       </BarChart>
     </ResponsiveContainer>
@@ -96,22 +112,25 @@ function PieChartView({ visualization }: { visualization: VisualizationData }) {
   }))
 
   return (
-    <ResponsiveContainer width="100%" height={320}>
+    <ResponsiveContainer width="100%" height={340}>
       <PieChart>
         <Pie
           data={pieData}
           cx="50%"
           cy="50%"
-          labelLine
+          labelLine={{ stroke: '#9ca3af', strokeWidth: 1 }}
           label={({ name, percent }: { name?: string; percent?: number }) => `${name ?? ''} (${((percent ?? 0) * 100).toFixed(0)}%)`}
-          outerRadius={110}
+          outerRadius={115}
+          innerRadius={45}
           dataKey="value"
+          paddingAngle={2}
+          stroke="none"
         >
           {pieData.map((_: any, i: number) => (
             <Cell key={`cell-${i}`} fill={COLORS[i % COLORS.length]} />
           ))}
         </Pie>
-        <Tooltip />
+        <Tooltip content={<CustomTooltip />} />
       </PieChart>
     </ResponsiveContainer>
   )
@@ -124,19 +143,21 @@ function LineChartView({ visualization }: { visualization: VisualizationData }) 
 
   return (
     <ResponsiveContainer width="100%" height={320}>
-      <LineChart data={chartData} margin={{ top: 5, right: 20, bottom: 5, left: 10 }}>
-        <CartesianGrid strokeDasharray="3 3" />
-        <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-        <YAxis tick={{ fontSize: 11 }} />
-        <Tooltip />
-        {datasets.length > 1 && <Legend />}
+      <LineChart data={chartData} margin={{ top: 10, right: 20, bottom: 5, left: 10 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
+        <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#6b7280' }} axisLine={{ stroke: '#d1d5db' }} tickLine={false} />
+        <YAxis tick={{ fontSize: 11, fill: '#6b7280' }} axisLine={false} tickLine={false} />
+        <Tooltip content={<CustomTooltip />} />
+        {datasets.length > 1 && <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12 }} />}
         {datasets.map((ds: any, i: number) => (
           <Line
             key={ds.label}
             type="monotone"
             dataKey={ds.label}
             stroke={COLORS[i % COLORS.length]}
-            strokeWidth={2}
+            strokeWidth={2.5}
+            dot={{ r: 4, fill: COLORS[i % COLORS.length], strokeWidth: 0 }}
+            activeDot={{ r: 6, strokeWidth: 2, stroke: '#fff' }}
           />
         ))}
       </LineChart>
@@ -147,11 +168,11 @@ function LineChartView({ visualization }: { visualization: VisualizationData }) 
 function NumberView({ visualization }: { visualization: VisualizationData }) {
   const { value, label } = visualization.data || {}
   return (
-    <div className="flex flex-col items-center py-6">
-      <div className="text-4xl font-bold text-blue-600">
+    <div className="flex flex-col items-center py-8">
+      <div className="text-5xl font-bold bg-gradient-to-r from-indigo-500 to-cyan-500 bg-clip-text text-transparent">
         {typeof value === 'number' ? value.toLocaleString() : value}
       </div>
-      {label && <div className="text-sm text-gray-500 mt-2">{label}</div>}
+      {label && <div className="text-sm text-gray-500 mt-3 font-medium">{label}</div>}
     </div>
   )
 }
@@ -161,22 +182,22 @@ function TableView({ visualization }: { visualization: VisualizationData }) {
   if (!columns.length) return <EmptyState />
 
   return (
-    <div className="overflow-x-auto max-h-64">
-      <table className="min-w-full text-xs border-collapse">
-        <thead>
-          <tr className="bg-gray-100">
+    <div className="overflow-x-auto max-h-72 rounded-lg">
+      <table className="min-w-full text-xs">
+        <thead className="sticky top-0">
+          <tr className="bg-gray-50">
             {columns.map((col: string, i: number) => (
-              <th key={i} className="px-3 py-1.5 text-left font-semibold border-b border-gray-200">
+              <th key={i} className="px-4 py-2.5 text-left font-semibold text-gray-600 border-b-2 border-gray-200 uppercase tracking-wider text-[10px]">
                 {col}
               </th>
             ))}
           </tr>
         </thead>
-        <tbody>
+        <tbody className="divide-y divide-gray-100">
           {rows.slice(0, 50).map((row: any[], ri: number) => (
-            <tr key={ri} className={ri % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+            <tr key={ri} className="hover:bg-indigo-50/50 transition-colors">
               {row.map((cell: any, ci: number) => (
-                <td key={ci} className="px-3 py-1 border-b border-gray-100">
+                <td key={ci} className="px-4 py-2 text-gray-700">
                   {cell != null ? String(cell) : ''}
                 </td>
               ))}
@@ -189,7 +210,12 @@ function TableView({ visualization }: { visualization: VisualizationData }) {
 }
 
 function EmptyState() {
-  return <div className="text-sm text-gray-400 py-4 text-center">No data available for visualization.</div>
+  return (
+    <div className="text-sm text-gray-400 py-8 text-center">
+      <div className="text-3xl mb-2">📊</div>
+      No data available for visualization.
+    </div>
+  )
 }
 
 export default function VisualizationRenderer({ visualization }: VisualizationRendererProps) {
@@ -205,8 +231,8 @@ export default function VisualizationRenderer({ visualization }: VisualizationRe
   const ChartComponent = chartRenderers[visualization.chart_type] || TableView
 
   return (
-    <div className="mt-3 bg-white border border-gray-200 rounded-lg overflow-hidden">
-      <div className="px-4 py-2 bg-gray-50 border-b border-gray-200">
+    <div className="mt-3 bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+      <div className="px-5 py-3 border-b border-gray-100">
         <div className="font-semibold text-sm text-gray-800">{visualization.title}</div>
         {visualization.description && (
           <div className="text-xs text-gray-500 mt-0.5">{visualization.description}</div>
@@ -216,7 +242,7 @@ export default function VisualizationRenderer({ visualization }: VisualizationRe
         <ChartComponent visualization={visualization} />
       </div>
       {visualization.summary && (
-        <div className="px-4 py-2 bg-blue-50 border-t border-blue-100 text-xs text-blue-800">
+        <div className="px-5 py-3 bg-indigo-50/60 border-t border-indigo-100 text-xs text-indigo-700 leading-relaxed">
           {visualization.summary}
         </div>
       )}

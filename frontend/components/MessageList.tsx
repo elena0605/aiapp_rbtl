@@ -5,7 +5,7 @@ import { Message } from './ChatInterface'
 import CypherViewer from './CypherViewer'
 import ResultsTable from './ResultsTable'
 import VisualizationRenderer from './VisualizationRenderer'
-import { Trash2, Star, ThumbsUp, ThumbsDown, Send } from 'lucide-react'
+import { Trash2, Star, ThumbsUp, ThumbsDown, Send, Check } from 'lucide-react'
 
 function formatDateSeparator(date: Date): string {
   const now = new Date()
@@ -84,27 +84,28 @@ function FeedbackWidget({
 
   if (alreadyRated) {
     return (
-      <div className="mt-3 pt-2 border-t border-gray-200 flex items-center gap-2 text-xs text-gray-500">
-        <span>Feedback submitted</span>
+      <div className="mt-3 pt-2.5 border-t border-gray-200/80 flex items-center gap-2 text-xs text-gray-500">
+        <Check size={12} className="text-green-500" />
+        <span>Thanks for your feedback</span>
         {message.feedback === 'up' ? (
-          <ThumbsUp size={12} className="text-green-600" fill="currentColor" />
+          <ThumbsUp size={12} className="text-emerald-500" fill="currentColor" />
         ) : (
-          <ThumbsDown size={12} className="text-red-500" fill="currentColor" />
+          <ThumbsDown size={12} className="text-rose-400" fill="currentColor" />
         )}
       </div>
     )
   }
 
   return (
-    <div className="mt-3 pt-2 border-t border-gray-200">
+    <div className="mt-3 pt-2.5 border-t border-gray-200/80">
       <div className="flex items-center gap-3">
-        <span className="text-xs text-gray-500">Was this helpful?</span>
+        <span className="text-xs text-gray-400">Was this helpful?</span>
         <button
           onClick={() => handleThumbClick('up')}
-          className={`p-1.5 rounded-full transition-colors ${
+          className={`p-1.5 rounded-lg transition-all duration-200 ${
             pendingRating === 'up'
-              ? 'bg-green-100 text-green-600'
-              : 'text-gray-400 hover:bg-gray-200 hover:text-green-600'
+              ? 'bg-emerald-100 text-emerald-600 scale-110'
+              : 'text-gray-300 hover:bg-emerald-50 hover:text-emerald-500 hover:scale-105'
           }`}
           title="Helpful"
         >
@@ -112,10 +113,10 @@ function FeedbackWidget({
         </button>
         <button
           onClick={() => handleThumbClick('down')}
-          className={`p-1.5 rounded-full transition-colors ${
+          className={`p-1.5 rounded-lg transition-all duration-200 ${
             pendingRating === 'down'
-              ? 'bg-red-100 text-red-500'
-              : 'text-gray-400 hover:bg-gray-200 hover:text-red-500'
+              ? 'bg-rose-100 text-rose-500 scale-110'
+              : 'text-gray-300 hover:bg-rose-50 hover:text-rose-400 hover:scale-105'
           }`}
           title="Not helpful"
         >
@@ -124,12 +125,12 @@ function FeedbackWidget({
       </div>
 
       {pendingRating && (
-        <div className="mt-2 space-y-2">
+        <div className="mt-2.5 space-y-2 animate-in fade-in">
           <textarea
             value={comment}
             onChange={(e) => setComment(e.target.value)}
             placeholder="Add a comment (optional)..."
-            className="w-full text-sm border border-gray-300 rounded-md p-2 resize-none focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-blue-400"
+            className="w-full text-sm border border-gray-200 rounded-lg p-2.5 resize-none focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 bg-white/80 placeholder:text-gray-300 transition-shadow"
             rows={2}
             disabled={isSubmitting}
           />
@@ -137,19 +138,19 @@ function FeedbackWidget({
             <button
               onClick={handleSubmit}
               disabled={isSubmitting}
-              className="flex items-center gap-1 px-3 py-1 text-xs font-medium text-white bg-blue-500 rounded-md hover:bg-blue-600 disabled:opacity-50 transition-colors"
+              className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-medium text-white bg-indigo-500 rounded-lg hover:bg-indigo-600 disabled:opacity-50 transition-all shadow-sm hover:shadow"
             >
               {isSubmitting ? (
                 <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white"></div>
               ) : (
-                <Send size={12} />
+                <Send size={11} />
               )}
               Send Feedback
             </button>
             <button
               onClick={handleSkipComment}
               disabled={isSubmitting}
-              className="px-3 py-1 text-xs text-gray-500 hover:text-gray-700 transition-colors"
+              className="px-3 py-1.5 text-xs text-gray-400 hover:text-gray-600 transition-colors"
             >
               Skip
             </button>
@@ -187,7 +188,7 @@ export default function MessageList({
           <div key={message.id}>
             {showDateSeparator && (
               <div className="flex items-center justify-center my-4">
-                <div className="bg-gray-200 text-gray-600 text-xs px-3 py-1 rounded-full">
+                <div className="bg-gray-100 text-gray-500 text-xs px-4 py-1 rounded-full font-medium">
                   {formatDateSeparator(message.timestamp)}
                 </div>
               </div>
@@ -196,10 +197,10 @@ export default function MessageList({
               className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
             >
           <div
-            className={`relative max-w-[80%] rounded-lg p-4 break-words overflow-hidden ${
+            className={`relative max-w-[80%] rounded-2xl p-4 break-words overflow-hidden transition-shadow ${
               message.role === 'user'
-                ? 'bg-blue-500 text-white'
-                : 'bg-gray-100 text-gray-900'
+                ? 'bg-gradient-to-br from-indigo-500 to-indigo-600 text-white shadow-md shadow-indigo-200/50'
+                : 'bg-white text-gray-900 shadow-sm border border-gray-100'
             }`}
           >
             <div className="flex items-center justify-between mb-1 gap-2">
@@ -209,8 +210,8 @@ export default function MessageList({
               <div className="flex items-center gap-2">
                 <span className={`text-xs ${
                   message.role === 'user' 
-                    ? 'text-white/80' 
-                    : 'text-gray-500'
+                    ? 'text-white/70' 
+                    : 'text-gray-400'
                 }`}>
                   {message.timestamp.toLocaleTimeString('en-US', {
                     hour: '2-digit',
@@ -236,10 +237,10 @@ export default function MessageList({
                 {onDeleteMessage && message.id && (
                   <button
                     onClick={() => onDeleteMessage(message.id)}
-                    className={`p-1 rounded-full transition-colors ${
+                    className={`p-1 rounded-full transition-all duration-200 ${
                       message.role === 'user'
-                        ? 'text-white hover:bg-white/20'
-                        : 'text-gray-500 hover:bg-gray-200'
+                        ? 'text-white/60 hover:bg-white/20 hover:text-white'
+                        : 'text-gray-300 hover:bg-gray-100 hover:text-gray-500'
                     }`}
                     disabled={deletingMessageId === message.id}
                     title="Delete message"
@@ -311,9 +312,9 @@ export default function MessageList({
             )}
             
             {message.error && message.cypher && (
-              <div className="mt-3 p-2 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
-                <div className="font-semibold mb-1">Validation Details:</div>
-                <div className="mt-1 font-mono text-xs bg-red-100 p-2 rounded">
+              <div className="mt-3 p-3 bg-red-50 border border-red-100 rounded-xl text-red-700 text-sm">
+                <div className="font-semibold mb-1 text-xs uppercase tracking-wide text-red-500">Validation Details</div>
+                <div className="mt-1 font-mono text-xs bg-red-100/60 p-2.5 rounded-lg text-red-800">
                   Generated Query: {message.cypher}
                 </div>
               </div>
