@@ -4,7 +4,7 @@ description: Determine the best chart type and structure data for frontend visua
 tags: [graph, visualization, chart]
 params:
   temperature: 0.0
-  max_tokens: 800
+  max_tokens: 1500
 
 variables:
   - name: question

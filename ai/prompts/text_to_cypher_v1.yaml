@@ -68,6 +68,15 @@ Temporal handling:
 Convert Neo4j temporal properties (DateTime, LocalDateTime, Date, Time, Duration) to strings using toString() only when those fields are returned.
 Example: RETURN toString(tc.create_time) AS create_time
 
+Query pattern rules:
+OPTIONAL MATCH is only for optional/enrichment data.
+NEVER use OPTIONAL MATCH followed by WHERE <variable> IS NOT NULL to simulate filtering.
+If a relationship is required by the question (e.g. location, demographics), use MATCH, not OPTIONAL MATCH.
+Start queries from the most restrictive conditions (e.g. location) before expanding to other patterns.
+When multiple geographic paths exist, combine them using OR in a WHERE clause or UNION — not multiple OPTIONAL MATCH clauses.
+Correct: MATCH (p:Person)-[:LIVES_IN_MUNICIPALITY]->(m:Municipality {municipality_name: 'X'}), (p)-[:FOLLOWS]->(i:Influencer) RETURN i.name
+Wrong: MATCH (p)-[:FOLLOWS]->(i) OPTIONAL MATCH (p)-[:LIVES_IN_MUNICIPALITY]->(m {municipality_name: 'X'}) WHERE m IS NOT NULL RETURN i.name
+
 User question: {{question}}
 tests:
   - input:

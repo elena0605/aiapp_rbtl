@@ -55,8 +55,11 @@ template: |
   If failure type is "empty_results":
   - The query executed but returned 0 rows. This often means property values don't match what's in the database.
   - Check the terminology mapping above for correct property values (exact casing, spacing, canonical values).
-  - Consider relaxing filters: remove overly specific constraints, use broader matching, or check if the property field name is correct.
+  - Consider relaxing filters: try alternate property values from the terminology, use CONTAINS for partial matching, or broaden numeric ranges.
+  - NEVER replace MATCH with OPTIONAL MATCH to "relax" a filter. OPTIONAL MATCH is a LEFT JOIN and will return unrelated rows, producing incorrect results.
+  - NEVER change the fundamental structure of geographic filters (LIVES_IN_AREA, LIVES_IN_MUNICIPALITY, BELONGS_TO). Only adjust property values.
   - Do NOT change the fundamental intent of the query — just fix the filters so they match actual data.
+  - If the data genuinely does not exist for the given filters, return an empty string.
 
   Rules:
   - Generate read-only Cypher only. Never use CREATE, MERGE, DELETE, SET, REMOVE, or DROP.

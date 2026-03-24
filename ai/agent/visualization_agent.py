@@ -157,7 +157,7 @@ class VisualizationAgent:
                 rendered,
                 model=self._llm_model,
                 temperature=0.0,
-                max_tokens=800,
+                max_tokens=1500,
                 response_format={"type": "json_object"},
             )
         except Exception:
@@ -165,7 +165,7 @@ class VisualizationAgent:
                 rendered,
                 model=self._llm_model,
                 temperature=0.0,
-                max_tokens=800,
+                max_tokens=1500,
             )
 
         return self._parse_response(raw, question, results)
