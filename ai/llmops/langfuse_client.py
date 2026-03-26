@@ -92,6 +92,20 @@ def _log_completion_diagnostics(res: Any, *, model: str, label: str) -> None:
         # Azure returns content_filter_results on the choice when filtering triggers
         filter_results = getattr(choice, "content_filter_results", None)
 
+        # Log token usage from the API response
+        usage = getattr(res, "usage", None)
+        usage_str = ""
+        if usage:
+            prompt_tokens = getattr(usage, "prompt_tokens", "?")
+            completion_tokens = getattr(usage, "completion_tokens", "?")
+            total_tokens = getattr(usage, "total_tokens", "?")
+            # Check for reasoning tokens (thinking models like o1/o3/gpt-5-mini)
+            details = getattr(usage, "completion_tokens_details", None)
+            reasoning_tokens = getattr(details, "reasoning_tokens", None) if details else None
+            usage_str = f" usage(prompt={prompt_tokens} completion={completion_tokens} total={total_tokens})"
+            if reasoning_tokens is not None:
+                usage_str += f" reasoning_tokens={reasoning_tokens}"
+
         if finish_reason == "content_filter" or (content_len == 0 and finish_reason != "stop"):
             parts = [
                 f"[LLM][{label}] WARNING model={model}",
@@ -100,14 +114,32 @@ def _log_completion_diagnostics(res: Any, *, model: str, label: str) -> None:
             ]
             if filter_results is not None:
                 parts.append(f"filter_results={filter_results}")
+            parts.append(usage_str)
             print(" ".join(parts), file=sys.stderr)
         else:
             print(
-                f"[LLM][{label}] model={model} finish_reason={finish_reason} content_len={content_len}",
+                f"[LLM][{label}] model={model} finish_reason={finish_reason} content_len={content_len}{usage_str}",
                 file=sys.stderr,
             )
     except Exception as exc:
         print(f"[LLM][{label}] diagnostics error: {exc}", file=sys.stderr)
+
+
+_CONTENT_FILTER_MAX_RETRIES = 2
+_CONTENT_FILTER_RETRY_DELAY = 1.0  # seconds
+
+
+def _is_content_filtered(res: Any) -> bool:
+    """Return True if the response looks like it was blocked by a content filter."""
+    try:
+        choice = res.choices[0] if res.choices else None
+        if choice is None:
+            return True
+        content = (choice.message.content or "") if choice.message else ""
+        finish = getattr(choice, "finish_reason", None)
+        return len(content) == 0 and finish != "stop"
+    except Exception:
+        return False
 
 
 def create_completion(
@@ -118,6 +150,7 @@ def create_completion(
     max_tokens: int,
     langfuse_prompt: Any = None,
     response_format: Optional[Dict[str, Any]] = None,
+    system_message: Optional[str] = None,
 ) -> str:
     """Create a chat completion using Langfuse OpenAI wrapper when configured.
 
@@ -131,7 +164,56 @@ def create_completion(
         max_tokens: Maximum tokens to generate
         langfuse_prompt: Optional Langfuse prompt object to link to the observation
         response_format: Optional response format (e.g., {"type": "json_object"} or JSON schema)
+        system_message: Optional system message for context (helps with Azure content filters)
     """
+    import time as _time
+
+    for attempt in range(_CONTENT_FILTER_MAX_RETRIES + 1):
+        result = _create_completion_inner(
+            prompt,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            langfuse_prompt=langfuse_prompt,
+            response_format=response_format,
+            system_message=system_message,
+        )
+        if result.strip():
+            return result
+        if attempt < _CONTENT_FILTER_MAX_RETRIES:
+            print(
+                f"[LLM] content filter likely triggered (attempt {attempt + 1}), "
+                f"retrying in {_CONTENT_FILTER_RETRY_DELAY}s...",
+                file=sys.stderr,
+            )
+            _time.sleep(_CONTENT_FILTER_RETRY_DELAY)
+    return result
+
+
+def _create_completion_inner(
+    prompt: str,
+    *,
+    model: str,
+    temperature: float,
+    max_tokens: int,
+    langfuse_prompt: Any = None,
+    response_format: Optional[Dict[str, Any]] = None,
+    system_message: Optional[str] = None,
+) -> str:
+    """Single-attempt completion call (used by create_completion with retry wrapper)."""
+    total_chars = len(prompt) + (len(system_message) if system_message else 0)
+    est_tokens = total_chars // 4  # rough estimate: ~4 chars per token
+    print(
+        f"[LLM] call: model={model} prompt_chars={total_chars} "
+        f"est_input_tokens≈{est_tokens} max_completion_tokens={max_tokens}",
+        file=sys.stderr,
+    )
+    # Build messages array with optional system message
+    messages: list[Dict[str, str]] = []
+    if system_message:
+        messages.append({"role": "system", "content": system_message})
+    messages.append({"role": "user", "content": prompt})
+
     # Try Langfuse OpenAI wrapper first if keys are provided
     # Get environment-specific credentials
     environment = os.environ.get("ENVIRONMENT", "production").lower()
@@ -184,7 +266,7 @@ def create_completion(
                 # Azure OpenAI (GPT-5-mini) only supports default temperature (1.0)
                 kwargs = {
                     "model": model,
-                    "messages": [{"role": "user", "content": prompt}],
+                    "messages": messages,
                     "max_completion_tokens": max_tokens,
                 }
                 # Azure OpenAI only supports default temperature (1.0), so skip temperature parameter
@@ -214,7 +296,7 @@ def create_completion(
                 
                 kwargs = {
                     "model": model,
-                    "messages": [{"role": "user", "content": prompt}],
+                    "messages": messages,
                 }
                 # Some models only support default temperature (1.0), skip temperature parameter
                 # gpt-4o and some newer models may have temperature restrictions
@@ -325,7 +407,7 @@ def create_completion(
         )
         create_kwargs = {
             "model": model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": messages,
             "max_completion_tokens": max_tokens,
         }
         # Azure OpenAI only supports default temperature (1.0), so skip temperature parameter
@@ -345,7 +427,7 @@ def create_completion(
         
         create_kwargs = {
             "model": model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": messages,
         }
         # Some models only support default temperature (1.0), skip temperature parameter
         # gpt-4o and some newer models may have temperature restrictions

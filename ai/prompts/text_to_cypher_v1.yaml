@@ -4,7 +4,7 @@ description: Convert a user question into a Cypher statement using the provided 
 tags: [graph, cypher, retrieval]
 params:
   temperature: 0.0
-  max_tokens: 1200
+  max_tokens: 16000
 
 variables:
   - name: schema
@@ -14,70 +14,79 @@ variables:
   - name: question
 
 template: |
-Instructions: 
-Generate a single read-only Cypher statement to query a graph database and answer the user question below.
+  Instructions: 
+  Generate a single read-only Cypher statement to query a graph database and answer the user question below.
 
-Graph Database Schema:
-Use only the provided relationship types and properties in the schema.
-Do not use any relationship types, labels, or properties that are not provided in the schema.
-{{schema}}
+  Graph Database Schema:
+  Use only the provided relationship types and properties in the schema.
+  Do not use any relationship types, labels, or properties that are not provided in the schema.
+  {{schema}}
 
-Terminology mapping:
-This section helps map user language to graph schema fields and values.
-Treat it as semantic guidance, but ensure final Cypher uses real schema labels, relationships, and properties.
-{{terminology}}
+  Terminology mapping:
+  This section helps map user language to graph schema fields and values.
+  Treat it as semantic guidance, but ensure final Cypher uses real schema labels, relationships, and properties.
+  {{terminology}}
 
-Examples:
-The following examples provide useful query patterns.
-{{examples}}
+  Examples:
+  The following examples provide useful query patterns.
+  {{examples}}
 
-Conversation context:
-The following is recent conversation history. Use it to resolve ambiguous references in the user question (e.g., "the same area", "those influencers", "and for males?"). If the current question is self-contained, ignore this section.
-{{conversation_context}}
+  Conversation context:
+  The following is recent conversation history. Use it to resolve ambiguous references in the user question (e.g., "the same area", "those influencers", "and for males?"). If the current question is self-contained, ignore this section.
+  {{conversation_context}}
 
-Format instructions:
-Do not include any explanations or apologies in your response.
-Do not respond to anything except constructing the Cypher statement.
-Do not include any text except the generated Cypher statement.
-Do not use markdown/code blocks.
-ONLY RESPOND WITH CYPHER.
+  Format instructions:
+  Do not include any explanations or apologies in your response.
+  Do not respond to anything except constructing the Cypher statement.
+  Do not include any text except the generated Cypher statement.
+  Do not use markdown/code blocks.
+  ONLY RESPOND WITH CYPHER.
 
-Read-only and safety constraints:
-Generate read-only Cypher only.
-Never generate write or schema-changing operations, including (but not limited to): CREATE, MERGE, DELETE, SET, REMOVE, DROP, CALL dbms.*, CREATE INDEX/CONSTRAINT, or any data-modifying procedure.
-Use Neo4j Cypher only. Do not use APOC or other procedures unless they are explicitly present in the provided schema/examples.
-Return exactly one Cypher query.
+  Read-only and safety constraints:
+  Generate read-only Cypher only.
+  Never generate write or schema-changing operations, including (but not limited to): CREATE, MERGE, DELETE, SET, REMOVE, DROP, CALL dbms.*, CREATE INDEX/CONSTRAINT, or any data-modifying procedure.
+  Use Neo4j Cypher only. Do not use APOC or other procedures unless they are explicitly present in the provided schema/examples.
+  Return exactly one Cypher query.
 
-Fallback behavior:
-If the question cannot be answered with the provided schema/terminology, return an empty string.
+  Fallback behavior:
+  If the question cannot be answered with the provided schema/terminology, return an empty string.
 
-RETURN clause guidelines:
-Only return properties explicitly mentioned in the user's question.
-Include properties directly related to the query criteria (e.g., if filtering by age and smoking, return those).
-Do NOT include unrelated properties unless explicitly requested.
-Keep RETURN clauses minimal and focused on the user request.
-SECURITY RESTRICTION: UserID is sensitive data and must NEVER be returned, even if explicitly requested. Never include p.UserID, UserID, or any variation in RETURN clauses.
+  RETURN clause guidelines:
+  Only return properties explicitly mentioned in the user's question.
+  Include properties directly related to the query criteria (e.g., if filtering by age and smoking, return those).
+  Do NOT include unrelated properties unless explicitly requested.
+  Keep RETURN clauses minimal and focused on the user request.
+  SECURITY RESTRICTION: UserID is sensitive data and must NEVER be returned, even if explicitly requested. Never include p.UserID, UserID, or any variation in RETURN clauses.
 
-Type/value handling rules:
-For Person categorical string fields, use exact equality with canonical values from terminology (e.g., p.smoking_frequency = 'Never Smoked').
-Do not use partial matching (CONTAINS, STARTS WITH, ENDS WITH) for Person categorical fields unless explicitly required by the question.
-Use numeric comparisons for numeric fields (e.g., gender, school_year).
-When returning gender to users, map numeric codes to human-readable labels via CASE.
+  Type/value handling rules:
+  For Person categorical string fields, use exact equality with canonical values from terminology (e.g., p.smoking_frequency = 'Never Smoked').
+  Do not use partial matching (CONTAINS, STARTS WITH, ENDS WITH) for Person categorical fields unless explicitly required by the question.
+  Use numeric comparisons for numeric fields (e.g., gender, school_year).
+  When returning gender to users, map numeric codes to human-readable labels via CASE.
 
-Temporal handling:
-Convert Neo4j temporal properties (DateTime, LocalDateTime, Date, Time, Duration) to strings using toString() only when those fields are returned.
-Example: RETURN toString(tc.create_time) AS create_time
+  Temporal handling:
+  Convert Neo4j temporal properties (DateTime, LocalDateTime, Date, Time, Duration) to strings using toString() only when those fields are returned.
+  Example: RETURN toString(tc.create_time) AS create_time
 
-Query pattern rules:
-OPTIONAL MATCH is only for optional/enrichment data.
-NEVER use OPTIONAL MATCH followed by WHERE <variable> IS NOT NULL to simulate filtering.
-If a relationship is required by the question (e.g. location, demographics), use MATCH, not OPTIONAL MATCH.
-Start queries from the most restrictive conditions (e.g. location) before expanding to other patterns.
-When multiple geographic paths exist, combine them using OR in a WHERE clause or UNION — not multiple OPTIONAL MATCH clauses.
-Correct: MATCH (p:Person)-[:LIVES_IN_MUNICIPALITY]->(m:Municipality {municipality_name: 'X'}), (p)-[:FOLLOWS]->(i:Influencer) RETURN i.name
-Wrong: MATCH (p)-[:FOLLOWS]->(i) OPTIONAL MATCH (p)-[:LIVES_IN_MUNICIPALITY]->(m {municipality_name: 'X'}) WHERE m IS NOT NULL RETURN i.name
+  Query pattern rules:
+  OPTIONAL MATCH is only for optional/enrichment data.
+  NEVER use OPTIONAL MATCH followed by WHERE <variable> IS NOT NULL to simulate filtering.
+  If a relationship is required by the question (e.g. location, demographics), use MATCH, not OPTIONAL MATCH.
+  Start queries from the most restrictive conditions (e.g. location) before expanding to other patterns.
+  When multiple geographic paths exist, combine them using OR in a WHERE clause or UNION — not multiple OPTIONAL MATCH clauses.
+  Correct: MATCH (p:Person)-[:LIVES_IN_MUNICIPALITY]->(m:Municipality {municipality_name: 'X'}), (p)-[:FOLLOWS]->(i:Influencer) RETURN i.name
+  Wrong: MATCH (p)-[:FOLLOWS]->(i) OPTIONAL MATCH (p)-[:LIVES_IN_MUNICIPALITY]->(m {municipality_name: 'X'}) WHERE m IS NOT NULL RETURN i.name
 
-User question: {{question}}
+  Content and topic search:
+  For guidance on which video properties to search when users ask about content topics, refer to the content_search section in the terminology mapping.
+
+  Platform-specific following:
+  The FOLLOWS relationship has boolean properties follows_tiktok and follows_youtube. When the user asks about TikTok influencers or TikTok following, always add WHERE f.follows_tiktok = true. When the user asks about YouTube influencers or YouTube following, always add WHERE f.follows_youtube = true.
+  Correct: MATCH (p:Person)-[f:FOLLOWS]->(i:Influencer)-[:HAS_ACCOUNT]->(tt:TikTokUser) WHERE f.follows_tiktok = true RETURN i.name, tt.username
+  Wrong: MATCH (p:Person)-[:FOLLOWS]->(i:Influencer)-[:HAS_ACCOUNT]->(tt:TikTokUser) RETURN i.name, tt.username
+
+  User question: {{question}}
+
 tests:
   - input:
       schema: "(:A)-[:R]->(:B)"

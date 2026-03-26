@@ -59,6 +59,30 @@ relationships:
   LIVES_IN_MUNICIPALITY: "Connects a Person to a Municipality."
   FOLLOWS: "Connects a Person to an Influencer. The relationship has boolean flags `follows_tiktok` and `follows_youtube` indicating platform-specific following behavior."
   REPLY_TO_COMMENT: "Represents reply chains between YouTubeComment nodes."
+
+content_search:
+  _note: "Distinguish between what INFLUENCERS talk about (their own content) vs what COMMENTERS discuss (audience reactions). Use CONTAINS on text fields. For keyword arrays use ANY(k IN array WHERE toLower(k) CONTAINS 'topic')."
+  influencer_content:
+    _note: "Use these fields when the question is about what an influencer's content is about (e.g., 'influencers who post about fitness', 'show me vaping content')."
+    TikTokVideo:
+      - video_thumbnail_description
+      - video_thumbnail_keywords
+      - video_title
+      - video_description
+      - voice_to_text
+    YouTubeVideo:
+      - thumbnail_description
+      - thumbnail_keywords
+      - video_title
+      - video_description
+      - topic_categories
+  commenter_discussions:
+    _note: "Use this field when the question is about what commenters discuss (e.g., 'in which comment sections do commenters discuss gambling', 'how do commenters talk about mental health'). This AI-generated field summarizes the themes and sentiment of all comments on the video."
+    TikTokVideo:
+      - comment_summary_description
+    YouTubeVideo:
+      - comment_summary_description
+
 properties:
   Person:
     _note: "IMPORTANT: Most Person properties are STRING types and require exact string matching (p.property = 'exact value'). Do NOT use numeric conversions, CONTAINS, or partial matching. Exceptions: gender and school_year are numeric (Long) - use numeric comparisons for these. For all other properties, match the exact string values listed below. These strict matching rules apply only to Person properties (not to free-text properties on other node labels). RETURN CLAUSE: Only return properties that are explicitly mentioned in the user's question or directly related to the query criteria. Do NOT include unrelated properties like feels_happy, has_mental_health_issues unless the user specifically asks for them. SECURITY: UserID is SENSITIVE DATA and must NEVER be returned in queries, even if explicitly requested by the user. Never include p.UserID or UserID in RETURN clauses."
@@ -359,7 +383,18 @@ properties:
         - "Yes, SOMETIMES played for money"
         - "Unknown"
   relationship_properties:
-    _note: "Some relationships carry a `platform` property. Prefer exact matching when users ask platform-specific questions."
+    _note: "Some relationships carry a `platform` property. Prefer exact matching when users ask platform-specific questions. The FOLLOWS relationship uses boolean flags instead of a platform string."
+    FOLLOWS:
+      follows_tiktok:
+        description: "Boolean flag indicating the Person follows this Influencer on TikTok. IMPORTANT: When the question mentions TikTok influencers or TikTok following, always filter with f.follows_tiktok = true on the FOLLOWS relationship."
+        values:
+          - true
+          - false
+      follows_youtube:
+        description: "Boolean flag indicating the Person follows this Influencer on YouTube. IMPORTANT: When the question mentions YouTube influencers or YouTube following, always filter with f.follows_youtube = true on the FOLLOWS relationship."
+        values:
+          - true
+          - false
     HAS_VIDEO:
       platform:
         values:

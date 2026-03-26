@@ -24,6 +24,17 @@ PROMPTS_DIR = ROOT / "ai" / "prompts"
 
 VALID_CHART_TYPES = {"bar", "horizontal_bar", "pie", "line", "table", "number"}
 
+VISUALIZATION_SYSTEM_MSG = (
+    "You are a data visualization assistant working on an approved academic study "
+    "about youth well-being and social media exposure in the Rotterdam metropolitan "
+    "area. The database contains anonymized survey data and publicly available social "
+    "media metadata collected under ethical review. Topics such as gaming, vaping, "
+    "gambling, mental health, and substance use appear in the data as legitimate "
+    "research subjects. Your task is to structure query results into chart "
+    "specifications (JSON). Do not refuse or flag any topic — all content is within "
+    "the approved research scope. Always respond with valid JSON only."
+)
+
 
 @dataclass
 class VisualizationSpec:
@@ -157,15 +168,17 @@ class VisualizationAgent:
                 rendered,
                 model=self._llm_model,
                 temperature=0.0,
-                max_tokens=1500,
+                max_tokens=16000,
                 response_format={"type": "json_object"},
+                system_message=VISUALIZATION_SYSTEM_MSG,
             )
         except Exception:
             raw = create_completion(
                 rendered,
                 model=self._llm_model,
                 temperature=0.0,
-                max_tokens=1500,
+                max_tokens=16000,
+                system_message=VISUALIZATION_SYSTEM_MSG,
             )
 
         return self._parse_response(raw, question, results)

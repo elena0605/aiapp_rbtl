@@ -242,8 +242,15 @@ class IntentRouter:
                 route = msg.get("route_type")
                 if route:
                     parts.append(f"  [Route: {route}]")
-                if len(content) > 300:
-                    content = content[:300] + "..."
+                results = msg.get("results")
+                if results and isinstance(results, list):
+                    import json
+                    results_json = json.dumps(results[:15], ensure_ascii=False, default=str)
+                    if len(results_json) > 2000:
+                        results_json = results_json[:2000] + "...(truncated)]"
+                    parts.append(f"  [Results ({len(results)} rows): {results_json}]")
+                if len(content) > 600:
+                    content = content[:600] + "..."
                 parts.insert(0, f"Assistant: {content}")
                 lines.append("\n".join(parts))
             else:
@@ -457,7 +464,7 @@ class IntentRouter:
                 rendered,
                 model=self._llm_model,
                 temperature=0.0,
-                max_tokens=600,
+                max_tokens=16000,
                 response_format={"type": "json_object"},
             )
             if raw.strip():
@@ -479,7 +486,7 @@ class IntentRouter:
                 rendered,
                 model=self._llm_model,
                 temperature=0.0,
-                max_tokens=600,
+                max_tokens=16000,
             )
             if raw.strip():
                 return raw

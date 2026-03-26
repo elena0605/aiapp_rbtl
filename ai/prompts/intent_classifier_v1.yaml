@@ -1,10 +1,10 @@
 id: graph.intent_classifier
-version: 3
+version: 4
 description: Classify user intent and rewrite follow-up questions into self-contained queries using rich conversation context.
 tags: [graph, routing, intent, agent]
 params:
   temperature: 0.0
-  max_tokens: 500
+  max_tokens: 16000
 
 variables:
   - name: domain_description
@@ -33,8 +33,8 @@ template: |
      - "graph_query": A question that can be answered by querying the knowledge graph (e.g., "How many persons live in Rotterdam Centrum?", "Which influencers have the most followers?")
      - "visualization": The user explicitly or implicitly requests a visual representation of data (e.g., "Show me a chart of smoking by area", "Visualize the age distribution", "Plot the follower counts", "Can you graph that?", "Show me a bar chart of..."). The key signal is the user asking for a chart, plot, graph, visualization, or visual comparison.
      - "analytics": A question about graph structure, communities, rankings, or network analysis (e.g., "What are the main communities?", "Who are the most influential nodes?", "Find bridges in the network")
-     - "discussion": The user asks for interpretation, explanation, reasoning, or advice about previously returned data or the domain — WITHOUT needing a new database query. Examples: "Why is the count so low?", "What patterns do you see?", "What's the best chart for this?", "Can you explain these results?", "What does this suggest about smoking trends?", "What should I ask next?". The key signal is the user wants the assistant to THINK about existing data or the domain rather than FETCH new data.
-     - "follow_up": The message references or continues the previous conversation AND needs new data (e.g., "What about Amsterdam?", "Show me more details", "And for females?", "Same but for age 15"). The user wants the SAME kind of query but with different parameters. If the follow-up is asking for explanation or interpretation instead of new data, classify as "discussion".
+     - "discussion": The user asks for interpretation, explanation, reasoning, formatting, or advice about previously returned data or the domain — WITHOUT needing a new database query. Examples: "Why is the count so low?", "What patterns do you see?", "What's the best chart for this?", "Can you explain these results?", "What does this suggest about smoking trends?", "What should I ask next?", "Summarize the results", "Make a table of the results", "Put that in a table", "Format the data nicely", "Can you summarize what you returned?". The key signal is the user wants the assistant to THINK about, REFORMAT, or SUMMARIZE existing data rather than FETCH new data. If the data has already been returned and the user just wants it presented differently, this is discussion — NOT follow_up or graph_query.
+     - "follow_up": The message references or continues the previous conversation AND needs NEW data from the database (e.g., "What about Amsterdam?", "And for females?", "Same but for age 15"). The user wants the SAME kind of query but with different parameters. IMPORTANT: If the user asks to summarize, reformat, or make a table of results that were ALREADY returned, classify as "discussion", NOT follow_up.
      - "off_topic": A question completely unrelated to the domain (e.g., "What's the weather?", "Write me a poem", "How do I cook pasta?")
      - "chitchat": A greeting, farewell, thanks, or social pleasantry (e.g., "Hello", "Thanks!", "Good job")
 
