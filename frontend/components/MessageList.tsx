@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { Message } from './ChatInterface'
 import CypherViewer from './CypherViewer'
 import ResultsTable from './ResultsTable'
+import MediaRetrievalView from './MediaRetrievalView'
 import VisualizationRenderer from './VisualizationRenderer'
 import { Trash2, Star, ThumbsUp, ThumbsDown, Send, Check } from 'lucide-react'
 
@@ -301,7 +302,32 @@ export default function MessageList({
               </div>
             )}
             
-            {message.results && message.results.length > 0 && !message.visualization && (
+            {((message.results && message.results.length > 0) ||
+              message.route_type === 'hybrid_media' ||
+              message.retrieval_trace) &&
+              !message.visualization &&
+              (message.route_type === 'media_retrieval' ||
+                message.route_type === 'hybrid_media') && (
+              <div className="mt-3 max-w-full">
+                <MediaRetrievalView
+                  results={message.results || []}
+                  routeType={message.route_type}
+                  toolName={message.tool_name}
+                  toolInputs={message.tool_inputs}
+                  retrievalTrace={message.retrieval_trace}
+                  researchNotes={message.research_notes}
+                  dedupedByInfluencer={message.deduped_by_influencer}
+                  stage1={message.stage1}
+                  candidateCounts={message.candidate_counts}
+                />
+              </div>
+            )}
+
+            {message.results &&
+              message.results.length > 0 &&
+              !message.visualization &&
+              message.route_type !== 'media_retrieval' &&
+              message.route_type !== 'hybrid_media' && (
               <div className="mt-3 max-w-full overflow-x-auto">
                 <ResultsTable results={message.results} />
               </div>

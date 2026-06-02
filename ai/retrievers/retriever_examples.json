@@ -1,0 +1,130 @@
+{
+  "description": "Seed examples mapping user questions to retriever choices. Used as few-shot examples by MediaRetrievalAgent's LLM selector and copied into the intent classifier prompt (ai/prompts/intent_classifier_v1.yaml) as media_retrieval / hybrid_media seeds.",
+  "version": 1,
+  "media_retrieval_examples": [
+    {
+      "question": "How many creators have audiences discussing gaming?",
+      "retriever": "youtube.count_creators_by_topic",
+      "platform": "all",
+      "theme": "gaming",
+      "notes": "Pure count; topic signal. When platform='all', the agent runs both youtube.* and tiktok.* and merges via Influencer dedup."
+    },
+    {
+      "question": "Which creators have audiences discussing vaping?",
+      "retriever": "youtube.top_creators",
+      "platform": "all",
+      "theme": "vaping",
+      "notes": "Ranked creator list; comment-topic signal."
+    },
+    {
+      "question": "Show me videos whose comment sections discuss mental health.",
+      "retriever": "youtube.comment_discussions",
+      "platform": "all",
+      "theme": "mental health",
+      "notes": "Comment-summary signal; per-video evidence."
+    },
+    {
+      "question": "Which videos are about energy drinks?",
+      "retriever": "youtube.content_videos",
+      "platform": "all",
+      "theme": "energy drinks",
+      "notes": "Video-content signal (title/description/thumbnail/tags)."
+    },
+    {
+      "question": "Which creators make content about gambling?",
+      "retriever": "youtube.content_top_creators",
+      "platform": "all",
+      "theme": "gambling",
+      "notes": "Video-content signal ranked per creator."
+    },
+    {
+      "question": "How many videos have comment sections discussing loneliness?",
+      "retriever": "youtube.count_videos_by_comment_summary",
+      "platform": "all",
+      "theme": "loneliness",
+      "notes": "Count via comment-summary signal."
+    },
+    {
+      "question": "How many videos are about laughing gas?",
+      "retriever": "youtube.count_videos_by_content",
+      "platform": "all",
+      "theme": "laughing gas",
+      "notes": "Count via video-content signal."
+    },
+    {
+      "question": "How many videos discuss cannabis in comments?",
+      "retriever": "youtube.count_videos_by_topic",
+      "platform": "all",
+      "theme": "cannabis",
+      "notes": "Count via comment-topic signal."
+    },
+    {
+      "question": "Most popular videos where people discuss alcohol in comments.",
+      "retriever": "youtube.top_videos_by_topic_engagement",
+      "platform": "all",
+      "theme": "alcohol",
+      "notes": "Engagement-weighted topic ranking (topic match * log comments)."
+    },
+    {
+      "question": "Which popular creators have the biggest audience discussions about smoking?",
+      "retriever": "youtube.top_creators_by_topic_engagement",
+      "platform": "all",
+      "theme": "smoking",
+      "notes": "Engagement-weighted topic ranking per creator."
+    },
+    {
+      "question": "How many TikTok creators talk about online gambling?",
+      "retriever": "tiktok.count_creators_by_topic",
+      "platform": "tiktok",
+      "theme": "online gambling",
+      "notes": "Platform was pinned by the user."
+    },
+    {
+      "question": "Show me TikToks about energy drinks.",
+      "retriever": "tiktok.content_videos",
+      "platform": "tiktok",
+      "theme": "energy drinks",
+      "notes": "Platform was pinned by the user."
+    }
+  ],
+  "unmapped_pending_product_definition": [
+    {
+      "question": "Which creators are most associated with the topic 'vaping'?",
+      "reason": "No retriever is a faithful match. The current top_creators ranks by sum(score * weight), which is volume-biased: a creator with many low-quality matches can outrank a creator with a few strong ones. Defining 'most associated' (mean of top-N scores? per-video specificity? exclusivity?) needs product input. Tracked as a follow-up; see the retriever_accuracy plan in the airflow_upgrade repo."
+    }
+  ],
+  "hybrid_media_examples": [
+    {
+      "question": "In Rotterdam Centrum, how many creators talk about vaping?",
+      "stage1_retriever": "youtube.top_creators",
+      "theme": "vaping",
+      "structural_filter": "Persons in Area 'Rotterdam Centrum' who FOLLOW these creators (via Influencer -> HAS_ACCOUNT -> YouTubeChannel|TikTokUser)",
+      "platform": "all",
+      "notes": "Two-stage: Stage 1 gets candidate creators via the topic-signal creator retriever; Stage 2 LLM Cypher counts how many of those creators are followed by Persons living in Rotterdam Centrum."
+    },
+    {
+      "question": "Among 15-year-olds, which creators have audiences discussing gambling?",
+      "stage1_retriever": "youtube.top_creators",
+      "theme": "gambling",
+      "structural_filter": "Persons with age='15' who FOLLOW the candidate creators",
+      "platform": "all",
+      "notes": "Person-attribute structural filter."
+    },
+    {
+      "question": "In Feijenoord, how many videos are about vaping?",
+      "stage1_retriever": "youtube.content_videos",
+      "theme": "vaping",
+      "structural_filter": "Videos published by channels followed by Persons living in Area 'Feijenoord'",
+      "platform": "all",
+      "notes": "Video-content signal restricted to channels with local-following Persons."
+    },
+    {
+      "question": "Which TikTok creators are most popular with girls in IJsselmonde for gaming?",
+      "stage1_retriever": "tiktok.top_creators_by_topic_engagement",
+      "theme": "gaming",
+      "structural_filter": "Persons with gender='female' (or matching female encoding) living in Area 'IJsselmonde' who FOLLOW the candidate creators",
+      "platform": "tiktok",
+      "notes": "Combines gender + area + platform filters with engagement ranking."
+    }
+  ]
+}

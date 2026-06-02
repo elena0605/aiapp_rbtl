@@ -32,6 +32,23 @@ export interface ChatResponse {
   error?: string
   timings?: Record<string, number>
   message_id?: string
+  retrieval_trace?: {
+    steps?: Array<{ step: number; title: string; detail: string }>
+    params?: Record<string, unknown>
+    research_notes?: string[]
+  }
+  research_notes?: string[]
+  status?: string
+  deduped_by_influencer?: boolean
+  per_platform?: Record<string, any>
+  stage1?: {
+    results?: any[]
+    results_preview?: any[]
+    retriever_name?: string
+    deduped_by_influencer?: boolean
+    inputs?: Record<string, any>
+  }
+  candidate_counts?: Record<string, number>
 }
 
 export interface ChatMessageRecord {
@@ -51,6 +68,19 @@ export interface ChatMessageRecord {
   is_favorite?: boolean
   timings?: Record<string, number>
   feedback?: 'up' | 'down'
+  retrieval_trace?: ChatResponse['retrieval_trace']
+  research_notes?: string[]
+  status?: string
+  deduped_by_influencer?: boolean
+  per_platform?: Record<string, any>
+  stage1?: {
+    results?: any[]
+    results_preview?: any[]
+    retriever_name?: string
+    deduped_by_influencer?: boolean
+    inputs?: Record<string, any>
+  }
+  candidate_counts?: Record<string, number>
 }
 
 export interface ChatHistoryResponse {

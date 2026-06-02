@@ -175,6 +175,20 @@ class IntentRouter:
                 if route:
                     parts.append(f"  [Route: {route}]")
 
+                # For media_retrieval (and hybrid_media) turns, surface the
+                # retriever name + the theme/platform inputs so the follow-up
+                # rewriter can keep the prior context intact when the user
+                # says things like "and on TikTok?" or "what about gambling?".
+                tool_name = msg.get("tool_name")
+                if tool_name:
+                    parts.append(f"  [Tool: {tool_name}]")
+                tool_inputs = msg.get("tool_inputs") or {}
+                if isinstance(tool_inputs, dict):
+                    rel_keys = ("theme", "platform", "signal", "top_n")
+                    rel = {k: tool_inputs.get(k) for k in rel_keys if tool_inputs.get(k) is not None}
+                    if rel:
+                        parts.append(f"  [Tool inputs: {rel}]")
+
                 # Truncate long assistant text
                 if len(content) > 300:
                     content = content[:300] + "..."
@@ -242,6 +256,18 @@ class IntentRouter:
                 route = msg.get("route_type")
                 if route:
                     parts.append(f"  [Route: {route}]")
+                # Preserve retriever context for media_retrieval / hybrid_media
+                # follow-ups (e.g. "and on TikTok?") so the rewriter doesn't
+                # lose the prior theme / platform / signal.
+                tool_name = msg.get("tool_name")
+                if tool_name:
+                    parts.append(f"  [Tool: {tool_name}]")
+                tool_inputs = msg.get("tool_inputs") or {}
+                if isinstance(tool_inputs, dict):
+                    rel_keys = ("theme", "platform", "signal", "top_n")
+                    rel = {k: tool_inputs.get(k) for k in rel_keys if tool_inputs.get(k) is not None}
+                    if rel:
+                        parts.append(f"  [Tool inputs: {rel}]")
                 results = msg.get("results")
                 if results and isinstance(results, list):
                     import json
@@ -498,7 +524,17 @@ class IntentRouter:
 
     def _parse_response(self, raw: str, original_question: str) -> IntentResult:
         """Parse the LLM JSON response into an IntentResult."""
-        valid_intents = {"graph_query", "visualization", "analytics", "discussion", "follow_up", "off_topic", "chitchat"}
+        valid_intents = {
+            "graph_query",
+            "media_retrieval",
+            "hybrid_media",
+            "visualization",
+            "analytics",
+            "discussion",
+            "follow_up",
+            "off_topic",
+            "chitchat",
+        }
 
         try:
             text = raw.strip()

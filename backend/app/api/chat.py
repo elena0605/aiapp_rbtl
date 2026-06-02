@@ -46,6 +46,13 @@ class ChatMessage(BaseModel):
     is_favorite: bool = False
     timings: Optional[Dict[str, float]] = None
     feedback: Optional[str] = None
+    retrieval_trace: Optional[Dict[str, Any]] = None
+    research_notes: Optional[List[str]] = None
+    status: Optional[str] = None
+    deduped_by_influencer: Optional[bool] = None
+    per_platform: Optional[Dict[str, Any]] = None
+    stage1: Optional[Dict[str, Any]] = None
+    candidate_counts: Optional[Dict[str, int]] = None
 
 
 class ChatHistoryResponse(BaseModel):
@@ -88,6 +95,13 @@ class ChatResponse(BaseModel):
     error: Optional[str] = None
     timings: Optional[Dict[str, float]] = None
     message_id: Optional[str] = None
+    retrieval_trace: Optional[Dict[str, Any]] = None
+    research_notes: Optional[List[str]] = None
+    status: Optional[str] = None
+    deduped_by_influencer: Optional[bool] = None
+    per_platform: Optional[Dict[str, Any]] = None
+    stage1: Optional[Dict[str, Any]] = None
+    candidate_counts: Optional[Dict[str, int]] = None
 
 
 class FavoriteRequest(BaseModel):
@@ -274,6 +288,13 @@ async def chat(request: ChatRequest):
             "timestamp": datetime.utcnow(),
             "is_favorite": False,
             "timings": None if error_msg else result.get("timings"),
+            "retrieval_trace": None if error_msg else result.get("retrieval_trace"),
+            "research_notes": None if error_msg else result.get("research_notes"),
+            "status": None if error_msg else result.get("status"),
+            "deduped_by_influencer": None if error_msg else result.get("deduped_by_influencer"),
+            "per_platform": None if error_msg else result.get("per_platform"),
+            "stage1": None if error_msg else result.get("stage1"),
+            "candidate_counts": None if error_msg else result.get("candidate_counts"),
         }
         history_messages.append(assistant_message)
 
@@ -304,6 +325,13 @@ async def chat(request: ChatRequest):
                 "visualization": result.get("visualization"),
                 "error": None,
                 "timings": result.get("timings"),
+                "retrieval_trace": result.get("retrieval_trace"),
+                "research_notes": result.get("research_notes"),
+                "status": result.get("status"),
+                "deduped_by_influencer": result.get("deduped_by_influencer"),
+                "per_platform": result.get("per_platform"),
+                "stage1": result.get("stage1"),
+                "candidate_counts": result.get("candidate_counts"),
                 "message_id": assistant_message["id"],
             }
         return ChatResponse(**response_data)

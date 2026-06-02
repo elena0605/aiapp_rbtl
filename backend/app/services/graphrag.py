@@ -64,6 +64,28 @@ except Exception as e:
     _temp_logger2 = logging.getLogger("GraphRAGService")
     _temp_logger2.warning(f"Intent router import failed (non-ImportError): {e}")
 
+# Optional: Media retrieval agent (semantic retrieval over creators/videos/comments)
+try:
+    from ai.retrievers import MediaRetrievalAgent, MediaRetrievalAgentError
+    from ai.retrievers.hybrid_handler import HybridMediaHandler
+    MEDIA_RETRIEVAL_AVAILABLE = True
+except ImportError as e:
+    MEDIA_RETRIEVAL_AVAILABLE = False
+    MediaRetrievalAgent = None  # type: ignore[misc, assignment]
+    MediaRetrievalAgentError = None  # type: ignore[misc, assignment]
+    HybridMediaHandler = None  # type: ignore[misc, assignment]
+    import logging
+    _temp_logger3 = logging.getLogger("GraphRAGService")
+    _temp_logger3.warning(f"Media retrieval agent import failed: {e}")
+except Exception as e:
+    MEDIA_RETRIEVAL_AVAILABLE = False
+    MediaRetrievalAgent = None  # type: ignore[misc, assignment]
+    MediaRetrievalAgentError = None  # type: ignore[misc, assignment]
+    HybridMediaHandler = None  # type: ignore[misc, assignment]
+    import logging
+    _temp_logger3 = logging.getLogger("GraphRAGService")
+    _temp_logger3.warning(f"Media retrieval agent import failed (non-ImportError): {e}")
+
 # Optional: Visualization agent
 try:
     from ai.agent.visualization_agent import VisualizationAgent, VisualizationSpec
@@ -98,6 +120,11 @@ if VISUALIZATION_AVAILABLE:
     logger.info("Visualization agent is available")
 else:
     logger.warning("Visualization agent is NOT available")
+
+if MEDIA_RETRIEVAL_AVAILABLE:
+    logger.info("Media retrieval agent is available")
+else:
+    logger.warning("Media retrieval agent is NOT available (import failed)")
 
 
 _PROMPT_VAR_PATTERN = re.compile(r"{{\s*(\w+)\s*}}")
@@ -226,6 +253,8 @@ class GraphRAGService:
         self._visualization_agent = None
         self._discussion_prompt = None
         self._correction_prompt = None
+        self._media_retrieval_agent = None
+        self._hybrid_media_handler = None
     
     async def warmup(self) -> None:
         """Eagerly load all expensive resources so the first request is fast.
@@ -285,12 +314,28 @@ class GraphRAGService:
             except Exception as e:
                 logger.warning("Warmup: vector store init failed: %s", e)
 
+        async def _load_media_retrieval_agent():
+            try:
+                await loop.run_in_executor(None, self._get_media_retrieval_agent)
+                logger.info("Warmup: media retrieval agent initialized")
+            except Exception as e:
+                logger.warning("Warmup: media retrieval agent init failed: %s", e)
+
+        async def _load_hybrid_media_handler():
+            try:
+                await loop.run_in_executor(None, self._get_hybrid_media_handler)
+                logger.info("Warmup: hybrid media handler initialized")
+            except Exception as e:
+                logger.warning("Warmup: hybrid media handler init failed: %s", e)
+
         await asyncio.gather(
             _load_schema(),
             _load_terminology(),
             _load_prompts(),
             _load_intent_router(),
             _load_vector_store(),
+            _load_media_retrieval_agent(),
+            _load_hybrid_media_handler(),
         )
 
         elapsed = time.perf_counter() - t0
@@ -387,6 +432,48 @@ class GraphRAGService:
         if self._analytics_agent is None:
             self._analytics_agent = GraphAnalyticsAgent(use_llm_selector=True)
         return self._analytics_agent
+
+    def _get_media_retrieval_agent(self):
+        """Get or create media retrieval agent (lazy initialization).
+
+        Disabled when ``MEDIA_RETRIEVER_ENABLED=false`` so we can ship the
+        intent route safely and roll it out gradually in production.
+        """
+        if not MEDIA_RETRIEVAL_AVAILABLE:
+            return None
+        enabled = os.environ.get("MEDIA_RETRIEVER_ENABLED", "true").lower() in {"1", "true", "yes"}
+        if not enabled:
+            logger.info("Media retrieval agent disabled via MEDIA_RETRIEVER_ENABLED=false")
+            return None
+        if self._media_retrieval_agent is None:
+            try:
+                self._media_retrieval_agent = MediaRetrievalAgent()
+            except Exception as e:
+                logger.warning("Failed to initialize MediaRetrievalAgent: %s", e)
+                return None
+        return self._media_retrieval_agent
+
+    def _get_hybrid_media_handler(self):
+        """Get or create hybrid media handler (lazy initialization).
+
+        Reuses the underlying MediaRetrievalAgent so we don't load the
+        catalog twice. Disabled via ``MEDIA_HYBRID_ENABLED=false``.
+        """
+        if not MEDIA_RETRIEVAL_AVAILABLE or HybridMediaHandler is None:
+            return None
+        enabled = os.environ.get("MEDIA_HYBRID_ENABLED", "true").lower() in {"1", "true", "yes"}
+        if not enabled:
+            logger.info("Hybrid media handler disabled via MEDIA_HYBRID_ENABLED=false")
+            return None
+        if self._hybrid_media_handler is None:
+            try:
+                self._hybrid_media_handler = HybridMediaHandler(
+                    agent=self._get_media_retrieval_agent()
+                )
+            except Exception as e:
+                logger.warning("Failed to initialize HybridMediaHandler: %s", e)
+                return None
+        return self._hybrid_media_handler
 
     def _get_intent_router(self):
         """Get or create intent router (lazy initialization)."""
@@ -599,6 +686,40 @@ class GraphRAGService:
                             "analytics agent is not available; falling back to Cypher"
                         )
 
+                # ── Media retrieval (semantic over creators/videos/comments) ─
+                if intent_result.intent == "media_retrieval":
+                    media_result = await self._handle_media_retrieval(effective_q)
+                    if media_result is not None:
+                        media_result["intent"] = intent_result.intent
+                        media_result["intent_confidence"] = intent_result.confidence
+                        if intent_result.rewritten_question:
+                            media_result["original_question"] = question
+                            media_result["rewritten_question"] = (
+                                intent_result.rewritten_question
+                            )
+                        return media_result
+                    logger.info(
+                        "GraphRAG: media retrieval returned no result, "
+                        "falling back to Cypher"
+                    )
+
+                # ── Hybrid media (semantic theme + structural filter) ────────
+                if intent_result.intent == "hybrid_media":
+                    hybrid_result = await self._handle_hybrid_media(effective_q)
+                    if hybrid_result is not None:
+                        hybrid_result["intent"] = intent_result.intent
+                        hybrid_result["intent_confidence"] = intent_result.confidence
+                        if intent_result.rewritten_question:
+                            hybrid_result["original_question"] = question
+                            hybrid_result["rewritten_question"] = (
+                                intent_result.rewritten_question
+                            )
+                        return hybrid_result
+                    logger.info(
+                        "GraphRAG: hybrid media returned no result, "
+                        "falling back to Cypher"
+                    )
+
                 # ── Visualization ─────────────────────────────────────
                 if intent_result.intent == "visualization":
                     viz_result = await self._handle_visualization(
@@ -694,6 +815,113 @@ class GraphRAGService:
             return None
         except Exception as e:
             logger.warning("GraphRAG: analytics agent error: %s", e, exc_info=True)
+            return None
+
+    async def _handle_media_retrieval(self, question: str) -> Optional[Dict[str, Any]]:
+        """Run the media retrieval agent for a semantic creators/videos/comments query.
+
+        Returns ``None`` so the caller can fall through to the Cypher path
+        when no retriever can be matched or the agent fails to initialize.
+        Response shape mirrors ``_handle_analytics`` (route_type, tool_name,
+        tool_inputs, results, summary, examples_used, timings) so the
+        existing frontend handles it without changes; additional fields
+        (status, suggested_actions, candidate_keys, per_platform,
+        deduped_by_influencer) are surfaced for richer UX downstream.
+        """
+        agent = self._get_media_retrieval_agent()
+        if agent is None:
+            return None
+
+        start = time.perf_counter()
+        try:
+            logger.info("GraphRAG: running media retrieval agent for %r", question)
+            result = await agent.run(question)
+            elapsed = time.perf_counter() - start
+            logger.info(
+                "GraphRAG: media retrieval agent finished in %.2fs "
+                "(retriever=%s, platform=%s, status=%s, rows=%d)",
+                elapsed, result.retriever_name, result.platform, result.status,
+                len(result.raw_result),
+            )
+            converted_results = _convert_neo4j_temporal_to_string(result.raw_result)
+            return {
+                "question": question,
+                "route_type": "media_retrieval",
+                "tool_name": result.retriever_name,
+                "tool_inputs": result.inputs,
+                "results": converted_results,
+                "summary": result.summary,
+                "status": result.status,
+                "suggested_actions": result.suggested_actions,
+                "candidate_keys": result.candidate_keys,
+                "per_platform": result.per_platform,
+                "deduped_by_influencer": result.deduped_by_influencer,
+                "retrieval_trace": result.retrieval_trace,
+                "research_notes": result.research_notes,
+                "examples_used": None,
+                "cypher": None,
+                "error": None,
+                "timings": {"media_retrieval": round(elapsed, 3)},
+            }
+        except MediaRetrievalAgentError as e:
+            logger.info("GraphRAG: media retrieval agent could not match: %s", e)
+            return None
+        except Exception as e:
+            logger.warning(
+                "GraphRAG: media retrieval agent error: %s", e, exc_info=True
+            )
+            return None
+
+    async def _handle_hybrid_media(self, question: str) -> Optional[Dict[str, Any]]:
+        """Run the two-stage hybrid handler (semantic candidates + structural Cypher).
+
+        Returns ``None`` so the caller can fall through to plain Cypher when
+        the handler is unavailable or fails to produce a usable plan.
+        Response shape mirrors ``_handle_analytics`` plus ``cypher`` (so the
+        existing Cypher viewer in the frontend surfaces the structural query).
+        """
+        handler = self._get_hybrid_media_handler()
+        if handler is None:
+            return None
+
+        start = time.perf_counter()
+        try:
+            logger.info("GraphRAG: running hybrid media handler for %r", question)
+            result = await handler.handle(question)
+            elapsed = time.perf_counter() - start
+            logger.info(
+                "GraphRAG: hybrid media handler finished in %.2fs "
+                "(retriever=%s, status=%s, rows=%d)",
+                elapsed, result.retriever_name, result.status,
+                len(result.results),
+            )
+            converted_results = _convert_neo4j_temporal_to_string(result.results)
+            timings = dict(result.timings or {})
+            timings["total"] = round(elapsed, 3)
+            return {
+                "question": question,
+                "route_type": "hybrid_media",
+                "tool_name": result.retriever_name,
+                "tool_inputs": result.inputs,
+                "cypher": result.stage2_cypher,
+                "results": converted_results,
+                "summary": result.summary,
+                "status": result.status,
+                "stage1": result.stage1,
+                "candidate_counts": result.candidate_counts,
+                "retrieval_trace": result.retrieval_trace,
+                "research_notes": result.research_notes,
+                "deduped_by_influencer": (result.stage1 or {}).get(
+                    "deduped_by_influencer", False
+                ),
+                "examples_used": None,
+                "error": result.error,
+                "timings": timings,
+            }
+        except Exception as e:
+            logger.warning(
+                "GraphRAG: hybrid media handler error: %s", e, exc_info=True
+            )
             return None
 
     def _generate_summary_sync(

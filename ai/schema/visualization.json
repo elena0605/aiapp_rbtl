@@ -16,7 +16,17 @@
       "constraints": []
     },
     {
+      "name": "TikTokCommentTopic",
+      "indexes": [],
+      "constraints": []
+    },
+    {
       "name": "YouTubeChannel",
+      "indexes": [],
+      "constraints": []
+    },
+    {
+      "name": "YouTubeCommentTopic",
       "indexes": [],
       "constraints": []
     },
@@ -83,12 +93,27 @@
       "TikTokSticker"
     ],
     [
-      "YouTubeVideo",
-      "HAS_COMMENT",
-      "TikTokComment"
+      "TikTokVideo",
+      "HAS_COMMENT_TOPIC",
+      "YouTubeCommentTopic"
     ],
     [
       "TikTokVideo",
+      "HAS_COMMENT_TOPIC",
+      "TikTokCommentTopic"
+    ],
+    [
+      "YouTubeVideo",
+      "HAS_COMMENT_TOPIC",
+      "TikTokCommentTopic"
+    ],
+    [
+      "YouTubeVideo",
+      "HAS_COMMENT_TOPIC",
+      "YouTubeCommentTopic"
+    ],
+    [
+      "YouTubeVideo",
       "HAS_COMMENT",
       "TikTokComment"
     ],
@@ -96,6 +121,11 @@
       "YouTubeVideo",
       "HAS_COMMENT",
       "YouTubeComment"
+    ],
+    [
+      "TikTokVideo",
+      "HAS_COMMENT",
+      "TikTokComment"
     ],
     [
       "TikTokVideo",
@@ -158,12 +188,12 @@
       "YouTubeVideo"
     ],
     [
-      "YouTubeChannel",
+      "TikTokUser",
       "HAS_VIDEO",
       "TikTokVideo"
     ],
     [
-      "TikTokUser",
+      "YouTubeChannel",
       "HAS_VIDEO",
       "TikTokVideo"
     ],

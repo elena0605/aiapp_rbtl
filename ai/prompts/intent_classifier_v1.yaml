@@ -1,6 +1,6 @@
 id: graph.intent_classifier
-version: 4
-description: Classify user intent and rewrite follow-up questions into self-contained queries using rich conversation context.
+version: 5
+description: Classify user intent and rewrite follow-up questions into self-contained queries using rich conversation context. Includes media_retrieval for semantic queries over creators/videos/comments.
 tags: [graph, routing, intent, agent]
 params:
   temperature: 0.0
@@ -30,7 +30,9 @@ template: |
   Your tasks:
 
   1. Classify the intent of the user message into exactly ONE of these categories:
-     - "graph_query": A question that can be answered by querying the knowledge graph (e.g., "How many persons live in Rotterdam Centrum?", "Which influencers have the most followers?")
+     - "graph_query": A question that can be answered by structural Cypher over the knowledge graph (e.g., "How many persons live in Rotterdam Centrum?", "Which influencers have the most followers?"). Use this when the answer comes from explicit graph properties/relationships and does NOT require semantic similarity over comment topics, comment-section summaries, or video content text.
+     - "media_retrieval": A question that needs SEMANTIC retrieval over creators/videos/comments by topic or content — NOT a structural Cypher count. Use this when the question asks about a theme/topic/subject that is matched by meaning (not exact graph property), AND there is NO structural filter (no area, municipality, person attribute, follower demographic). Strong signals: "creators who talk about X", "audiences discussing X", "videos about X", "comment sections that discuss X", "how many creators talk about X", "show me videos where commenters discuss X", "most popular videos where people discuss X in comments". The user is asking for things that match X semantically across the YouTube/TikTok content layer (HAS_COMMENT_TOPIC, comment_summary_description, video_content_text). If a structural filter is ALSO present, use "hybrid_media" instead.
+     - "hybrid_media": A question that needs BOTH a semantic theme AND a structural graph filter. Use this when the question combines a semantic content/comment theme (the kind that would otherwise be media_retrieval) with a structural restriction on Persons, Areas, Municipalities, or follower demographics. Strong signals: "in <area>, how many creators talk about X", "among 15-year-olds, which creators discuss X", "for boys, which TikTokers make content about X", "in Feijenoord, how many videos discuss vaping". A question is hybrid_media if and only if it has BOTH a semantic theme AND a structural filter (geography / age / gender / school_year / vaping_frequency / gaming_frequency / etc.). If it has ONLY the structural part (no theme), it's graph_query. If it has ONLY the semantic part, it's media_retrieval.
      - "visualization": The user explicitly or implicitly requests a visual representation of data (e.g., "Show me a chart of smoking by area", "Visualize the age distribution", "Plot the follower counts", "Can you graph that?", "Show me a bar chart of..."). The key signal is the user asking for a chart, plot, graph, visualization, or visual comparison.
      - "analytics": A question about graph structure, communities, rankings, or network analysis (e.g., "What are the main communities?", "Who are the most influential nodes?", "Find bridges in the network")
      - "discussion": The user asks for interpretation, explanation, reasoning, formatting, or advice about previously returned data or the domain — WITHOUT needing a new database query. Examples: "Why is the count so low?", "What patterns do you see?", "What's the best chart for this?", "Can you explain these results?", "What does this suggest about smoking trends?", "What should I ask next?", "Summarize the results", "Make a table of the results", "Put that in a table", "Format the data nicely", "Can you summarize what you returned?". The key signal is the user wants the assistant to THINK about, REFORMAT, or SUMMARIZE existing data rather than FETCH new data. If the data has already been returned and the user just wants it presented differently, this is discussion — NOT follow_up or graph_query.
@@ -38,23 +40,57 @@ template: |
      - "off_topic": A question completely unrelated to the domain (e.g., "What's the weather?", "Write me a poem", "How do I cook pasta?")
      - "chitchat": A greeting, farewell, thanks, or social pleasantry (e.g., "Hello", "Thanks!", "Good job")
 
+  Examples of media_retrieval questions (these are NOT graph_query):
+     - "How many creators have audiences discussing gaming?"
+     - "Which creators have audiences discussing vaping?"
+     - "Show me videos whose comment sections discuss mental health."
+     - "Which videos are about energy drinks?"
+     - "Which creators make content about gambling?"
+     - "How many videos have comment sections discussing loneliness?"
+     - "How many videos are about laughing gas?"
+     - "How many videos discuss cannabis in comments?"
+     - "Most popular videos where people discuss alcohol in comments."
+     - "Which popular creators have the biggest audience discussions about smoking?"
+     - "How many TikTok creators talk about online gambling?"
+     - "Show me TikToks about energy drinks."
+
+  Examples of hybrid_media questions (semantic theme + structural filter):
+     - "In Rotterdam Centrum, how many creators talk about vaping?"
+     - "Among 15-year-olds, which creators have audiences discussing gambling?"
+     - "In Feijenoord, how many videos are about energy drinks?"
+     - "Which TikTok creators are most popular with girls in IJsselmonde for gaming?"
+     - "For boys aged 14, which YouTubers make content about smoking?"
+     - "In Charlois, how many videos discuss mental health in comments?"
+
+  Examples that stay graph_query (structural, no semantic content/comment matching):
+     - "How many persons live in Rotterdam Centrum?"
+     - "Which influencers have the most followers?"
+     - "Count persons by gender in Feijenoord."
+     - "Which areas have the highest smoking frequency?"
+
   2. If the intent is "follow_up", you MUST:
-     a. Rewrite the message into a complete, self-contained question using the conversation history. The rewritten question must be understandable WITHOUT any prior context. Include all relevant filters, entities, and constraints from the prior conversation.
-     b. Determine the "resolved_intent" — what the rewritten question should be routed to. This is usually "graph_query" but could be "analytics", "visualization", or "discussion" if the follow-up is about graph analysis, a chart request, or reasoning about results.
+     a. Rewrite the message into a complete, self-contained question using the conversation history. The rewritten question must be understandable WITHOUT any prior context. Include all relevant filters, entities, and constraints from the prior conversation. For follow-ups to media_retrieval turns, also carry forward the prior theme, platform, and retriever family (e.g. "audiences discussing X" stays a comment-topic question even if the follow-up only changes the platform or theme).
+     b. Determine the "resolved_intent" — what the rewritten question should be routed to. This is usually "graph_query" but could be "analytics", "visualization", "discussion", or "media_retrieval" depending on the kind of new data the rewrite needs.
 
      Examples of good rewrites:
      - Prior: "How many persons smoke in Rotterdam?" → Follow-up: "What about Amsterdam?" → Rewrite: "How many persons smoke in Amsterdam?" (resolved_intent: graph_query)
      - Prior: "Show influencers with most followers" → Follow-up: "And their videos?" → Rewrite: "Show the videos of the influencers with the most followers" (resolved_intent: graph_query)
      - Prior: "Count persons by gender in Feijenoord" → Follow-up: "Same for IJsselmonde" → Rewrite: "Count persons by gender in IJsselmonde" (resolved_intent: graph_query)
+     - Prior: "How many creators talk about gaming?" (route=media_retrieval, tool_name=youtube.count_creators_by_topic, tool_inputs.theme=gaming) → Follow-up: "and on TikTok?" → Rewrite: "How many TikTok creators have audiences discussing gaming?" (resolved_intent: media_retrieval)
+     - Prior: "Which creators have audiences discussing vaping?" (route=media_retrieval, tool_name=youtube.top_creators) → Follow-up: "what about gambling instead?" → Rewrite: "Which creators have audiences discussing gambling?" (resolved_intent: media_retrieval)
+     - Prior: "Show me videos about energy drinks" (route=media_retrieval, tool_name=youtube.content_videos) → Follow-up: "show me 20 more" → Rewrite: "Show me 20 videos about energy drinks" (resolved_intent: media_retrieval)
+     - Prior: media_retrieval results already shown → Follow-up: "sort by views" → resolved_intent: discussion (no new retrieval; reformat existing data).
+     - Prior: "How many creators talk about vaping?" (route=media_retrieval, tool_name=youtube.count_creators_by_topic, tool_inputs.theme=vaping) → Follow-up: "and in Rotterdam Centrum?" → Rewrite: "In Rotterdam Centrum, how many creators have audiences discussing vaping?" (resolved_intent: hybrid_media)
+     - Prior: "Which TikTok creators have audiences discussing gambling?" (route=media_retrieval, tool_name=tiktok.top_creators, tool_inputs.theme=gambling) → Follow-up: "only girls" → Rewrite: "Which TikTok creators have audiences discussing gambling among female Persons?" (resolved_intent: hybrid_media)
 
   3. Provide a confidence score between 0.0 and 1.0.
 
   Respond STRICTLY with JSON:
   {
-    "intent": "<one of: graph_query, visualization, analytics, discussion, follow_up, off_topic, chitchat>",
+    "intent": "<one of: graph_query, media_retrieval, hybrid_media, visualization, analytics, discussion, follow_up, off_topic, chitchat>",
     "confidence": <float between 0 and 1>,
     "rewritten_question": "<self-contained rewrite if follow_up, otherwise null>",
-    "resolved_intent": "<one of: graph_query, visualization, analytics, discussion — only required when intent is follow_up, otherwise omit>",
+    "resolved_intent": "<one of: graph_query, media_retrieval, hybrid_media, visualization, analytics, discussion — only required when intent is follow_up, otherwise omit>",
     "reasoning": "<one sentence explaining the classification>"
   }
 

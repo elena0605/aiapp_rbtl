@@ -168,7 +168,8 @@ class CypherValidator:
         query: str,
         strict: bool = True,
         database_name: Optional[str] = None,
-        enforce_read_only: bool = True
+        enforce_read_only: bool = True,
+        parameters: Optional[Dict[str, Any]] = None,
     ) -> Tuple[bool, Dict[str, Any]]:
         """Validate a Cypher query.
         
@@ -177,6 +178,8 @@ class CypherValidator:
             strict: If True, raises exception on validation failure. If False, returns (False, details)
             database_name: Override database name for this validation
             enforce_read_only: If True, ensures query is read-only (default: True)
+            parameters: Optional query parameters for EXPLAIN when the query uses
+                ``$param`` placeholders (required for hybrid Stage 2 validation)
         
         Returns:
             Tuple of (is_valid, validation_details)
@@ -232,10 +235,17 @@ class CypherValidator:
         
         # 1. Syntax Validation (must pass first)
         try:
-            is_syntax_valid, syntax_metadata = self.syntax_validator.validate(
-                query,
-                database_name=db_name
-            )
+            if parameters is not None:
+                is_syntax_valid, syntax_metadata = self._validate_syntax_with_parameters(
+                    query,
+                    parameters,
+                    database_name=db_name,
+                )
+            else:
+                is_syntax_valid, syntax_metadata = self.syntax_validator.validate(
+                    query,
+                    database_name=db_name
+                )
             validation_details["syntax_valid"] = is_syntax_valid
             validation_details["syntax_metadata"] = syntax_metadata
             
@@ -327,6 +337,44 @@ class CypherValidator:
         logger.debug("Cypher query validation passed")
         return True, validation_details
 
+    def _validate_syntax_with_parameters(
+        self,
+        query: str,
+        parameters: Dict[str, Any],
+        database_name: Optional[str] = None,
+    ) -> Tuple[bool, Any]:
+        """Run EXPLAIN with bound parameters so ``$param`` placeholders validate."""
+        metadata: List[Dict[str, str]] = []
+        explain_query = f"EXPLAIN {query}"
+        try:
+            _records, summary, _keys = self.driver.execute_query(
+                explain_query,
+                parameters=parameters,
+                database_=database_name,
+            )
+            if summary.notifications:
+                for notification in summary.notifications:
+                    code = notification.get("code", "")
+                    if code in {
+                        "Neo.ClientNotification.Statement.UnsatisfiableRelationshipTypeExpression",
+                    }:
+                        metadata.append(
+                            {
+                                "code": code,
+                                "description": notification.get("description", ""),
+                            }
+                        )
+            if metadata:
+                return False, metadata
+            return True, metadata
+        except Exception as e:
+            code = getattr(e, "code", e.__class__.__name__)
+            message = getattr(e, "message", str(e))
+            if "EXPLAIN" in str(message):
+                message = str(message).split("EXPLAIN")[0].strip('"')
+            metadata.append({"code": code, "description": message})
+            return False, metadata
+
 
 @lru_cache(maxsize=1)
 def get_validator(driver=None, database_name: Optional[str] = None) -> Optional[CypherValidator]:
@@ -349,7 +397,8 @@ def validate_cypher(
     strict: bool = True,
     driver=None,
     database_name: Optional[str] = None,
-    enforce_read_only: bool = True
+    enforce_read_only: bool = True,
+    parameters: Optional[Dict[str, Any]] = None,
 ) -> Tuple[bool, Dict[str, Any]]:
     """Convenience function to validate a Cypher query.
     
@@ -359,6 +408,7 @@ def validate_cypher(
         driver: Neo4j driver (optional, uses get_driver() if None)
         database_name: Database name (optional, uses get_default_database() if None)
         enforce_read_only: If True, ensures query is read-only (default: True)
+        parameters: Optional bound parameters for queries using ``$param`` placeholders
     
     Returns:
         Tuple of (is_valid, validation_details)
@@ -413,5 +463,6 @@ def validate_cypher(
         query,
         strict=strict,
         database_name=database_name,
-        enforce_read_only=enforce_read_only
+        enforce_read_only=enforce_read_only,
+        parameters=parameters,
     )

@@ -434,6 +434,69 @@ When enabled, the system will:
 
 For more details, see [GRAPH_ANALYTICS_GUIDE.md](GRAPH_ANALYTICS_GUIDE.md).
 
+## Media Retrieval Agent (semantic creators / videos / comments)
+
+A second agent, `MediaRetrievalAgent`, sits alongside the analytics agent and handles questions that need **semantic similarity** over the YouTube/TikTok content layer rather than structural Cypher. It powers the `media_retrieval` intent.
+
+### What it answers
+
+- "How many creators have audiences discussing **gaming**?"
+- "Which creators have audiences discussing **vaping**?"
+- "Show me videos whose comment sections discuss **mental health**."
+- "Which videos are about **energy drinks**?"
+- "Which creators make content about **gambling**?"
+- "Most popular videos where people discuss **alcohol** in comments."
+- "How many TikTok creators talk about **online gambling**?"
+- "Show me TikToks about **energy drinks**."
+
+### How it works
+
+1. The intent classifier (`ai/prompts/intent_classifier_v1.yaml`) tags the question as `media_retrieval`.
+2. `MediaRetrievalAgent` (in `ai/retrievers/`) picks one of 26 retrievers (13 YouTube + 13 TikTok) via an LLM selector with a deterministic keyword fallback. The selector also extracts a **clean theme** from the question — structural phrases like "in Rotterdam Centrum" are stripped because they belong to the `hybrid_media` route (Phase 7).
+3. The theme is rendered through a per-family template (`{theme}` for comment topics, `audiences discussing {theme}` for comment summaries, `videos about {theme}` for video content) and embedded with the media embedding model (default `text-embedding-3-large` to match the production indexes).
+4. The retriever runs a parameterized vector-search Cypher against the right Neo4j index (`youtube_comment_topic_embedding_index`, `video_summary_embedding_index`, `video_content_embedding_index`, plus the three TikTok counterparts). `top_k` is sized as a **fraction of the actual indexed-node count** (defaults: 20% for ranked, 100% for counts) so coverage stays consistent across signals and as the graph grows.
+5. When `platform="all"` (the default) the agent runs both the YouTube and TikTok retrievers and merges them. Creators are deduped across platforms via `Influencer -[:HAS_ACCOUNT]-> YouTubeChannel|TikTokUser` so the same person doesn't appear twice.
+
+Each row in the result carries an `explanation` block — relevance ranking, video count, sample topics, and a per-row score breakdown — so the frontend can show **why** a row ranked where it did.
+
+### Configuration
+
+All settings are optional with safe defaults. See `.env` for the full list. The most relevant knobs:
+
+| Variable | Default | Effect |
+|---|---|---|
+| `MEDIA_RETRIEVER_ENABLED` | `true` | Disable the route entirely (fall back to text-to-Cypher). |
+| `MEDIA_RETRIEVER_DEFAULT_PLATFORM` | `all` | `all` / `youtube` / `tiktok`. |
+| `MEDIA_RETRIEVER_MIN_SCORE` | `0.75` | Production threshold. Notebook default was `0.0`; we raised it so low-relevance themes don't flood answers. |
+| `MEDIA_RETRIEVER_K_FRACTION` | `0.20` | Top-k as a fraction of index size for ranked retrievers. |
+| `MEDIA_RETRIEVER_K_COUNT_FRACTION` | `1.0` | Same for count retrievers (full scan = honest counts). |
+| `MEDIA_RETRIEVER_TOP_N` | `10` | Default ranked-row count. |
+| `MEDIA_RETRIEVER_DEDUP_INFLUENCERS` | `true` | Merge YouTube + TikTok creator rows into one row per `Influencer`. |
+| `MEDIA_EMBEDDING_MODEL` | `text-embedding-3-large` | MUST match the model that produced the vectors stored in Neo4j. |
+
+### Startup index check
+
+On first use the agent runs `SHOW INDEXES` and logs a warning naming any of the six expected vector indexes that are missing. It does **not** create those indexes — that responsibility stays in the Airflow pipelines that own the data. If a query targets a missing index it returns a structured empty result with `suggested_actions` (e.g. "switch_platform", "switch_signal") rather than an error.
+
+### Hybrid retrieval (semantic theme + structural filter)
+
+Questions that combine a semantic theme with a structural restriction — for example "**In Rotterdam Centrum**, how many creators talk about **vaping**?" or "Among **15-year-olds**, which creators have audiences discussing **gambling**?" — are routed to the `hybrid_media` intent and handled by `HybridMediaHandler` (`ai/retrievers/hybrid_handler.py`).
+
+It runs in two stages:
+
+1. **Stage 1 (semantic)** — calls `MediaRetrievalAgent.run(question, mode="candidates")`. This picks the best ranked retriever for the theme, runs it with a wider `top_n`, and returns a seed set of `candidate_keys` (YouTube `channel_id` / TikTok `username` / `video_id`).
+2. **Stage 2 (structural)** — an LLM call against `ai/prompts/structural_filter_cypher_v1.yaml` generates read-only Cypher that applies the **structural** filter (area, municipality, age, gender, follower demographics) over those candidate IDs. The Cypher is validated through `utils.cypher_validator.validate_cypher` with `enforce_read_only=True` and only then executed.
+
+The semantic step (vector search) is deliberately not exposed to the structural LLM. The structural prompt is explicit that it must never use `CONTAINS`, regex, or vector calls on topic / content text — Stage 1 owns semantic matching, Stage 2 owns structural narrowing.
+
+When Stage 1 returns fewer than `MEDIA_HYBRID_MIN_CANDIDATES` seeds, the handler returns a `soft_failure` summary asking the user to broaden the theme rather than asking the LLM to filter a tiny seed set. If the Stage 2 prompt decides there is no structural filter in the question, it returns an empty Cypher string and the handler falls back to the plain Stage 1 result.
+
+| Variable                       | Default | What it controls                                                                |
+| ------------------------------ | ------- | ------------------------------------------------------------------------------- |
+| `MEDIA_HYBRID_ENABLED`         | `true`  | Master switch for the hybrid route. When `false`, hybrid questions go to text-to-Cypher. |
+| `MEDIA_HYBRID_MIN_CANDIDATES`  | `5`     | Minimum Stage 1 seeds required before Stage 2 runs.                              |
+| `MEDIA_HYBRID_MODEL`           | unset   | Override model used for the Stage 2 Cypher LLM call (falls back to `OPENAI_MODEL`). |
+
 ## MCP Client Integration
 
 This project can connect as an MCP client to other MCP servers, such as the [Neo4j GDS Agent](https://github.com/neo4j-contrib/gds-agent) for graph data science algorithms.

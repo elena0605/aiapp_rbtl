@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react'
 import MessageList from './MessageList'
 import MessageInput from './MessageInput'
+import type { RetrievalTrace } from './MediaRetrievalView'
 import {
   sendMessage,
   fetchChatHistory,
@@ -32,6 +33,13 @@ export interface Message {
   isFavorite?: boolean
   timings?: Record<string, number>
   feedback?: 'up' | 'down'
+  retrieval_trace?: RetrievalTrace
+  research_notes?: string[]
+  status?: string
+  deduped_by_influencer?: boolean
+  per_platform?: Record<string, any>
+  stage1?: ChatResponse['stage1']
+  candidate_counts?: Record<string, number>
 }
 
 interface ChatInterfaceProps {
@@ -241,6 +249,13 @@ export default function ChatInterface({
       isFavorite: record.is_favorite,
       timings: hasError ? undefined : (record as any).timings,
       feedback: record.feedback,
+      retrieval_trace: hasError ? undefined : (record as any).retrieval_trace,
+      research_notes: hasError ? undefined : (record as any).research_notes,
+      status: hasError ? undefined : (record as any).status,
+      deduped_by_influencer: hasError ? undefined : (record as any).deduped_by_influencer,
+      per_platform: hasError ? undefined : (record as any).per_platform,
+      stage1: hasError ? undefined : (record as any).stage1,
+      candidate_counts: hasError ? undefined : (record as any).candidate_counts,
     }
   }
 
@@ -349,6 +364,13 @@ export default function ChatInterface({
         timestamp: new Date(),
         isFavorite: false,
         timings: hasError ? undefined : response.timings,
+        retrieval_trace: hasError ? undefined : response.retrieval_trace,
+        research_notes: hasError ? undefined : response.research_notes,
+        status: hasError ? undefined : response.status,
+        deduped_by_influencer: hasError ? undefined : response.deduped_by_influencer,
+        per_platform: hasError ? undefined : response.per_platform,
+        stage1: hasError ? undefined : response.stage1,
+        candidate_counts: hasError ? undefined : response.candidate_counts,
       }
       
       // Log the final message to debug
