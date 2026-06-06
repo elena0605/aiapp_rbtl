@@ -150,6 +150,7 @@ export async function sendMessage(
     },
     {
       signal,
+      timeout: 180_000,
     }
   )
   return response.data
@@ -165,16 +166,26 @@ export async function fetchChatUsers(): Promise<string[]> {
   return response.data.users
 }
 
-export async function fetchChatHistory(username: string): Promise<ChatHistoryResponse> {
+export async function fetchChatHistory(
+  username: string,
+  options?: { limit?: number; signal?: AbortSignal }
+): Promise<ChatHistoryResponse> {
+  const limit = options?.limit ?? 120
   const response = await axios.get<ChatHistoryResponse>(
-    `${API_URL}/api/chat/history/${username}`
+    `${API_URL}/api/chat/history/${encodeURIComponent(username)}`,
+    {
+      params: { limit },
+      signal: options?.signal,
+      timeout: 30_000,
+    }
   )
   return response.data
 }
 
 export async function fetchFavorites(username: string): Promise<FavoritesResponse> {
   const response = await axios.get<FavoritesResponse>(
-    `${API_URL}/api/chat/favorites/${username}`
+    `${API_URL}/api/chat/favorites/${username}`,
+    { timeout: 30_000 }
   )
   return response.data
 }
@@ -186,7 +197,8 @@ export async function toggleFavoriteMessage(
 ): Promise<void> {
   await axios.post(
     `${API_URL}/api/chat/favorites/${encodeURIComponent(username)}/${encodeURIComponent(messageId)}`,
-    { is_favorite: isFavorite }
+    { is_favorite: isFavorite },
+    { timeout: 15_000 }
   )
 }
 

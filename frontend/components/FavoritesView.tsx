@@ -52,19 +52,21 @@ export default function FavoritesView({
   const handleRemove = async (messageId: string) => {
     if (!selectedUser) return
     setRemovingId(messageId)
+    const previous = favorites
+    setFavorites((prev) =>
+      prev
+        ? {
+            ...prev,
+            favorites: prev.favorites.filter(
+              (fav) => fav.message.id !== messageId
+            ),
+          }
+        : prev
+    )
     try {
       await toggleFavoriteMessage(selectedUser, messageId, false)
-      setFavorites((prev) =>
-        prev
-          ? {
-              ...prev,
-              favorites: prev.favorites.filter(
-                (fav) => fav.message.id !== messageId
-              ),
-            }
-          : prev
-      )
     } catch (err) {
+      setFavorites(previous)
       setError(
         `Failed to remove favorite${
           err instanceof Error ? `: ${err.message}` : ''

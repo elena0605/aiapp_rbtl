@@ -28,7 +28,7 @@ import logging
 import os
 import re
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import partial
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -52,6 +52,7 @@ from .base import (
     RetrieverConfig,
     RetrieverResult,
     list_expected_indexes,
+    run_neo4j_query,
 )
 from . import youtube as yt
 from . import tiktok as tt
@@ -62,19 +63,36 @@ logger = logging.getLogger("MediaRetrievalAgent")
 
 EXAMPLES_PATH = Path(__file__).resolve().parent / "retriever_examples.json"
 
-INFLUENCER_DEDUP_CYPHER = """
+_COUNT_TO_RANKED_SUFFIX: Dict[str, str] = {
+    "count_creators_by_topic": "top_creators",
+    "count_creators_by_content": "content_top_creators",
+    "count_videos_by_topic": "example_videos",
+    "count_videos_by_comment_summary": "comment_discussions",
+    "count_videos_by_content": "content_videos",
+}
+
+INFLUENCER_MAP_CYPHER = """
 MATCH (inf:Influencer)
-WHERE inf.youtube_username IN $youtube_usernames
-   OR inf.tiktok_username  IN $tiktok_usernames
 OPTIONAL MATCH (inf)-[:HAS_ACCOUNT]->(c:YouTubeChannel)
-WITH inf, collect(DISTINCT c) AS yt_channels
+WITH inf,
+     collect(DISTINCT c.channel_id) AS yt_channel_ids,
+     collect(DISTINCT c.title) AS yt_titles
 OPTIONAL MATCH (inf)-[:HAS_ACCOUNT]->(u:TikTokUser)
-WITH inf, yt_channels, collect(DISTINCT u) AS tt_users
+WITH inf,
+     yt_channel_ids,
+     yt_titles,
+     collect(DISTINCT u.username) AS tt_usernames_list
+WHERE (size($yt_creator_names) > 0 AND inf.youtube_username IN $yt_creator_names)
+   OR (size($tt_usernames) > 0 AND inf.tiktok_username IN $tt_usernames)
+   OR (size($yt_channel_ids) > 0 AND any(cid IN yt_channel_ids WHERE cid IN $yt_channel_ids))
+   OR (size($yt_creator_names) > 0 AND any(t IN yt_titles WHERE t IN $yt_creator_names))
+   OR (size($tt_usernames) > 0 AND any(un IN tt_usernames_list WHERE un IN $tt_usernames))
 RETURN inf.name AS influencer_name,
        inf.youtube_username AS youtube_username,
        inf.tiktok_username AS tiktok_username,
-       [c IN yt_channels | {platform: 'youtube', channel_id: c.channel_id, title: c.title}] AS youtube_accounts,
-       [u IN tt_users | {platform: 'tiktok', username: u.username, display_name: u.display_name}] AS tiktok_accounts
+       yt_channel_ids,
+       yt_titles,
+       tt_usernames_list
 """
 
 
@@ -248,12 +266,16 @@ class MediaRetrievalAgent:
                 inputs["theme"] = self._extract_theme_fallback(question) or question
             cfg = self._configs[explicit_retriever]
             platform = inputs.get("platform") or cfg.platform
-            return {
-                "retriever": explicit_retriever,
+            retriever_name = explicit_retriever
+            selection = {
+                "retriever": retriever_name,
                 "platform": platform,
                 "inputs": self._coerce_inputs(inputs, mode),
                 "reason": "explicit",
             }
+            if mode == "candidates":
+                selection = self._apply_hybrid_platform_defaults(question, selection)
+            return selection
 
         selected: Optional[Dict[str, Any]] = None
         if self._use_llm_selector:
@@ -279,7 +301,64 @@ class MediaRetrievalAgent:
         if platform not in {"youtube", "tiktok", "all"}:
             platform = "all"
         selected["platform"] = platform
+        if mode == "candidates":
+            selected = self._apply_hybrid_platform_defaults(question, selected)
         return selected
+
+    def _question_mentions_platform(self, question: str, platform: str) -> bool:
+        """Detect platform mentions without substring false positives (e.g. ``tt`` in Rotterdam)."""
+        normalized = question.lower()
+        for hint in self._PLATFORM_HINTS[platform]:
+            if " " in hint:
+                if hint in normalized:
+                    return True
+                continue
+            if re.search(rf"\b{re.escape(hint)}\b", normalized):
+                return True
+        return False
+
+    def _explicit_platform_in_question(self, question: str) -> Optional[str]:
+        """Return youtube/tiktok only when the user named one platform explicitly."""
+        yt = self._question_mentions_platform(question, "youtube")
+        tt = self._question_mentions_platform(question, "tiktok")
+        if yt and not tt:
+            return "youtube"
+        if tt and not yt:
+            return "tiktok"
+        return None
+
+    def _apply_hybrid_platform_defaults(
+        self, question: str, selected: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Hybrid Stage 1 searches both platforms unless the question names one."""
+        explicit = self._explicit_platform_in_question(question)
+        selected["platform"] = explicit or "all"
+
+        retriever = selected.get("retriever") or ""
+        suffix = retriever.split(".", 1)[1] if "." in retriever else retriever
+        if selected["platform"] == "all":
+            canonical = f"youtube.{suffix}"
+            if canonical in self._configs:
+                selected["retriever"] = canonical
+        else:
+            canonical = f"{selected['platform']}.{suffix}"
+            if canonical in self._configs:
+                selected["retriever"] = canonical
+
+        selected["retriever"] = self._remap_count_for_candidates(selected["retriever"])
+        return selected
+
+    def _remap_count_for_candidates(self, retriever_name: str) -> str:
+        """Hybrid Stage 1 must rank IDs; count retrievers only sample for display."""
+        if "." in retriever_name:
+            plat, suffix = retriever_name.split(".", 1)
+        else:
+            plat, suffix = "youtube", retriever_name
+        mapped = _COUNT_TO_RANKED_SUFFIX.get(suffix)
+        if not mapped:
+            return retriever_name
+        new_name = f"{plat}.{mapped}"
+        return new_name if new_name in self._configs else retriever_name
 
     def _coerce_inputs(self, inputs: Dict[str, Any], mode: str) -> Dict[str, Any]:
         out: Dict[str, Any] = {}
@@ -324,7 +403,7 @@ class MediaRetrievalAgent:
             except json.JSONDecodeError as exc:
                 logger.warning("retriever_examples.json invalid (%s)", exc)
                 self._examples_cache = {}
-        return self._examples_cache
+        return self._examples_cache or {}
 
     def _catalog_text(self, mode: str) -> str:
         lines: List[str] = []
@@ -394,6 +473,7 @@ Rules:
    gender, follower demographics), DO NOT change the retriever choice — those
    filters are handled by a separate hybrid handler. Just strip them from theme.
 6. If the question cannot be matched to any retriever, return {{"retriever": null}}.
+{f"7. This is hybrid Stage 1 (candidate collection). NEVER pick a count_* retriever — choose a ranked retriever from the catalog only." if mode == "candidates" else ""}
 
 Respond STRICTLY with this JSON shape, no commentary:
 {{
@@ -450,6 +530,8 @@ User question: {question}
                 "MediaRetrievalAgent: LLM selected unknown retriever %r", retriever
             )
             return None
+        if mode == "candidates":
+            retriever = self._remap_count_for_candidates(retriever)
         return {
             "retriever": retriever,
             "platform": (data.get("platform") or "all").lower(),
@@ -488,8 +570,8 @@ User question: {question}
 
         # Platform.
         platform = "all"
-        for plat, hints in self._PLATFORM_HINTS.items():
-            if any(h in normalized for h in hints):
+        for plat in self._PLATFORM_HINTS:
+            if self._question_mentions_platform(question, plat):
                 platform = plat
                 break
 
@@ -596,8 +678,12 @@ User question: {question}
 
         per_platform: Dict[str, RetrieverResult] = {}
         for cfg in runs:
+            runner = cfg.runner
+            if runner is None:
+                logger.warning("Retriever %s has no runner; skipping", cfg.name)
+                continue
             try:
-                result = cfg.runner(cfg, theme, top_n=top_n, min_score=min_score)
+                result = runner(cfg, theme, top_n=top_n, min_score=min_score)
             except Exception as exc:
                 logger.exception(
                     "Retriever %s failed for theme=%r: %s", cfg.name, theme, exc
@@ -612,7 +698,7 @@ User question: {question}
                     cfg.name, result.min_score, broadened,
                 )
                 try:
-                    result = cfg.runner(
+                    result = runner(
                         cfg, theme, top_n=top_n, min_score=broadened
                     )
                     result.summary = "[auto-broadened] " + (result.summary or "")
@@ -667,6 +753,73 @@ User question: {question}
         return self._merge_all_platforms(
             chosen=chosen, theme=theme, top_n=top_n, per_platform=per_platform
         )
+
+    def _hybrid_id_kind(self, cfg: RetrieverConfig) -> str:
+        if cfg.output_kind in {"creators", "count_creators"}:
+            return "creators"
+        if cfg.output_kind in {"videos", "count_videos"}:
+            return "videos"
+        if cfg.is_count and "creator" in cfg.name:
+            return "creators"
+        if cfg.is_count and "video" in cfg.name:
+            return "videos"
+        return "creators"
+
+    def _collect_threshold_candidate_keys(
+        self, stage1: MediaRetrievalResult
+    ) -> Dict[str, List[Any]]:
+        """Collect every account/video ID above min_score for hybrid Stage 2."""
+        theme = stage1.inputs.get("theme") or ""
+        if not theme:
+            return dict(stage1.candidate_keys or {})
+
+        min_score = stage1.inputs.get("min_score")
+        platform = stage1.platform
+
+        base_name = stage1.retriever_name
+        if base_name.startswith("all."):
+            base_name = "youtube." + base_name[len("all.") :]
+        cfg = self._configs.get(base_name)
+        if not cfg:
+            return dict(stage1.candidate_keys or {})
+
+        id_kind = self._hybrid_id_kind(cfg)
+        suffix = base_name.split(".", 1)[1] if "." in base_name else base_name
+        platforms = ["youtube", "tiktok"] if platform == "all" else [platform]
+
+        keys: Dict[str, List[Any]] = {}
+        video_kind = id_kind in {"videos", "count_videos"}
+        for plat in platforms:
+            plat_cfg = self._configs.get(f"{plat}.{suffix}")
+            if not plat_cfg:
+                continue
+            collector = yt if plat == "youtube" else tt
+            ids = collector.collect_threshold_candidate_ids(
+                plat_cfg, theme, id_kind=id_kind, min_score=min_score
+            )
+            if not ids:
+                continue
+            if video_kind:
+                bucket = keys.setdefault("video_ids", [])
+            elif plat == "youtube":
+                bucket = keys.setdefault("youtube_channel_ids", [])
+            else:
+                bucket = keys.setdefault("tiktok_usernames", [])
+            for item in ids:
+                if item not in bucket:
+                    bucket.append(item)
+
+        return keys or dict(stage1.candidate_keys or {})
+
+    async def refresh_hybrid_candidate_keys(
+        self, stage1: MediaRetrievalResult
+    ) -> MediaRetrievalResult:
+        """Re-scan the index and replace Stage 1 keys with all threshold matches."""
+        loop = asyncio.get_event_loop()
+        keys = await loop.run_in_executor(
+            None, partial(self._collect_threshold_candidate_keys, stage1)
+        )
+        return replace(stage1, candidate_keys=keys)
 
     def _wrap_single(
         self,
@@ -786,10 +939,7 @@ User question: {question}
                 except (TypeError, ValueError):
                     pass
 
-        per_platform_dicts = {
-            "youtube": yt_res.to_dict() if yt_res else None,
-            "tiktok": tt_res.to_dict() if tt_res else None,
-        }
+        per_platform_dicts = self._per_platform_dicts(yt_res, tt_res)
 
         deduped_sample: List[Dict[str, Any]] = []
         if (
@@ -1006,10 +1156,7 @@ User question: {question}
             status=status,
             suggested_actions=suggested,
             candidate_keys=self._combined_candidate_keys(yt_res, tt_res),
-            per_platform={
-                "youtube": yt_res.to_dict() if yt_res else None,
-                "tiktok": tt_res.to_dict() if tt_res else None,
-            },
+            per_platform=self._per_platform_dicts(yt_res, tt_res),
             deduped_by_influencer=deduped,
         )
 
@@ -1070,12 +1217,30 @@ User question: {question}
             status=status,
             suggested_actions=suggested,
             candidate_keys=self._combined_candidate_keys(yt_res, tt_res),
-            per_platform={
-                "youtube": yt_res.to_dict() if yt_res else None,
-                "tiktok": tt_res.to_dict() if tt_res else None,
-            },
+            per_platform=self._per_platform_dicts(yt_res, tt_res),
             deduped_by_influencer=False,
         )
+
+    @staticmethod
+    def _per_platform_dicts(
+        yt_res: Optional[RetrieverResult],
+        tt_res: Optional[RetrieverResult],
+    ) -> Dict[str, Dict[str, Any]]:
+        out: Dict[str, Dict[str, Any]] = {}
+        if yt_res is not None:
+            out["youtube"] = yt_res.to_dict()
+        if tt_res is not None:
+            out["tiktok"] = tt_res.to_dict()
+        return out
+
+    @staticmethod
+    def _string_values(rows: List[Dict[str, Any]], key: str) -> List[str]:
+        values: List[str] = []
+        for row in rows:
+            val = row.get(key)
+            if isinstance(val, str):
+                values.append(val)
+        return values
 
     # ── Influencer dedup ────────────────────────────────────────────────────
 
@@ -1096,54 +1261,22 @@ User question: {question}
         # name pulled from the channel (frontends typically use the channel
         # title). To stay safe we also pass channel_ids and union the result
         # with a relationship-based match.
-        yt_creator_names: List[str] = [
-            r.get("creator")
-            for r in yt_rows
-            if isinstance(r.get("creator"), str)
-        ]
-        tt_usernames: List[str] = [
-            r.get("username")
-            for r in tt_rows
-            if isinstance(r.get("username"), str)
-        ]
-        yt_channel_ids: List[str] = [
-            r.get("channel_id")
-            for r in yt_rows
-            if isinstance(r.get("channel_id"), str)
-        ]
-
-        cypher = """
-        // Match by username property on Influencer, OR via HAS_ACCOUNT to a
-        // YouTubeChannel whose channel_id is in $yt_channel_ids, OR via
-        // HAS_ACCOUNT to a TikTokUser whose username is in $tt_usernames.
-        MATCH (inf:Influencer)
-        OPTIONAL MATCH (inf)-[:HAS_ACCOUNT]->(c:YouTubeChannel)
-        OPTIONAL MATCH (inf)-[:HAS_ACCOUNT]->(u:TikTokUser)
-        WITH inf, collect(DISTINCT c.channel_id) AS yt_channel_ids,
-             collect(DISTINCT c.title) AS yt_titles,
-             collect(DISTINCT u.username) AS tt_usernames_list
-        WHERE inf.youtube_username IN $yt_creator_names
-           OR inf.tiktok_username  IN $tt_usernames
-           OR any(cid IN yt_channel_ids WHERE cid IN $yt_channel_ids)
-           OR any(t   IN yt_titles      WHERE t   IN $yt_creator_names)
-           OR any(un  IN tt_usernames_list WHERE un IN $tt_usernames)
-        RETURN inf.name AS influencer_name,
-               inf.youtube_username AS youtube_username,
-               inf.tiktok_username AS tiktok_username,
-               yt_channel_ids,
-               yt_titles,
-               tt_usernames_list
-        """
+        yt_creator_names = self._string_values(yt_rows, "creator")
+        tt_usernames = self._string_values(tt_rows, "username")
+        yt_channel_ids = self._string_values(yt_rows, "channel_id")
 
         mapping: Dict[Tuple[str, Any], Dict[str, Any]] = {}
         if not (yt_rows or tt_rows):
+            return mapping
+        if not (yt_creator_names or tt_usernames or yt_channel_ids):
             return mapping
 
         try:
             with get_session() as session:
                 records = list(
-                    session.run(
-                        cypher,
+                    run_neo4j_query(
+                        session,
+                        INFLUENCER_MAP_CYPHER,
                         yt_creator_names=yt_creator_names,
                         tt_usernames=tt_usernames,
                         yt_channel_ids=yt_channel_ids,

@@ -15,6 +15,7 @@ import {
   ChatMessageRecord,
   VisualizationData,
 } from '@/lib/api'
+import { isInternalErrorMessage, resolveAssistantContent } from '@/lib/userFacingErrors'
 
 export interface Message {
   id: string
@@ -233,18 +234,26 @@ export default function ChatInterface({
 
 
   const transformMessageRecord = (record: ChatMessageRecord): Message => {
-    const hasError = !!(record.error && record.error.trim())
+    const internalError = isInternalErrorMessage(record.error)
+    const hasError = !!(record.error && record.error.trim()) && !internalError
+    const resolved = resolveAssistantContent(
+      record.content,
+      internalError ? null : record.error,
+      record.summary
+    )
     return {
       id: record.id || `${record.timestamp}-${record.role}`,
       role: record.role,
-      content: record.content,
+      content: resolved.content,
       route_type: hasError ? undefined : record.route_type,
       cypher: record.cypher,
+      tool_name: hasError ? undefined : record.tool_name,
+      tool_inputs: hasError ? undefined : record.tool_inputs,
       results: hasError ? undefined : record.results,
       summary: hasError ? undefined : record.summary,
       examples: hasError ? undefined : record.examples,
       visualization: hasError ? undefined : record.visualization,
-      error: record.error,
+      error: hasError ? record.error : undefined,
       timestamp: new Date(record.timestamp),
       isFavorite: record.is_favorite,
       timings: hasError ? undefined : (record as any).timings,
@@ -260,22 +269,32 @@ export default function ChatInterface({
   }
 
   useEffect(() => {
+    const controller = new AbortController()
+    let active = true
+
     const loadHistory = async (username: string) => {
       setIsLoadingHistory(true)
       setHistoryError(null)
       try {
-        const history: ChatHistoryResponse = await fetchChatHistory(username)
+        const history: ChatHistoryResponse = await fetchChatHistory(username, {
+          limit: 120,
+          signal: controller.signal,
+        })
+        if (!active) return
         const formatted = history.messages.map(transformMessageRecord)
         setMessages(formatted)
-      } catch (error) {
+      } catch (error: any) {
+        if (!active || error?.code === 'ERR_CANCELED') return
         setMessages([])
-        setHistoryError(
-          `Unable to load chat history${
-            error instanceof Error ? `: ${error.message}` : ''
-          }`
-        )
+        const msg =
+          error?.code === 'ECONNABORTED'
+            ? 'Chat history request timed out — the server may be restarting. Refresh again in a few seconds.'
+            : error instanceof Error
+              ? error.message
+              : 'Unknown error'
+        setHistoryError(`Unable to load chat history: ${msg}`)
       } finally {
-        setIsLoadingHistory(false)
+        if (active) setIsLoadingHistory(false)
       }
     }
 
@@ -290,6 +309,11 @@ export default function ChatInterface({
       } else {
         setHistoryError(null)
       }
+    }
+
+    return () => {
+      active = false
+      controller.abort()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedUser, isUserSelectionReady, userLoadError])
@@ -329,24 +353,20 @@ export default function ChatInterface({
       
       // Set content to error message if there's an error, otherwise use summary
       // When there's an error, prioritize it and don't show success messages
-      const hasError = !!(response.error && response.error.trim())
-      console.log('ChatInterface: Response received', { 
-        hasError, 
-        error: response.error, 
+      const resolved = resolveAssistantContent(
+        response.summary || '',
+        response.error,
+        response.summary
+      )
+      const hasError = resolved.hasError
+      console.log('ChatInterface: Response received', {
+        hasError,
+        error: response.error,
         summary: response.summary,
         examples: response.examples_used,
-        timings: response.timings
+        timings: response.timings,
       })
-      
-      // ALWAYS prioritize error over summary - if error exists, use it as content
-      let content: string
-      if (hasError && response.error) {
-        content = response.error.trim()
-        console.log('ChatInterface: Error detected, using error as content:', content)
-      } else {
-        content = response.summary || 'Query executed successfully'
-        console.log('ChatInterface: No error, using summary as content:', content)
-      }
+      const content = resolved.content
       
       const assistantMessage: Message = {
         id: response.message_id || (Date.now() + 1).toString(),
@@ -360,7 +380,7 @@ export default function ChatInterface({
         summary: undefined,
         examples: hasError ? undefined : response.examples_used,
         visualization: hasError ? undefined : response.visualization,
-        error: response.error,
+        error: hasError ? response.error : undefined,
         timestamp: new Date(),
         isFavorite: false,
         timings: hasError ? undefined : response.timings,
@@ -399,11 +419,14 @@ export default function ChatInterface({
         // cancellation already handled
         return
       }
+      const rawError =
+        error instanceof Error ? error.message : 'Unknown error'
+      const resolved = resolveAssistantContent('', rawError, null)
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        error: error instanceof Error ? error.message : 'Unknown error',
+        content: resolved.content,
+        error: resolved.hasError ? rawError : undefined,
         timestamp: new Date(),
         isFavorite: false,
       }
@@ -421,14 +444,19 @@ export default function ChatInterface({
       return
     }
     setFavoriteUpdatingId(messageId)
+    setMessages((prev) =>
+      prev.map((msg) =>
+        msg.id === messageId ? { ...msg, isFavorite: nextState } : msg
+      )
+    )
     try {
       await toggleFavoriteMessage(selectedUser, messageId, nextState)
+    } catch (error) {
       setMessages((prev) =>
         prev.map((msg) =>
-          msg.id === messageId ? { ...msg, isFavorite: nextState } : msg
+          msg.id === messageId ? { ...msg, isFavorite: !nextState } : msg
         )
       )
-    } catch (error) {
       setHistoryError(
         `Failed to update favorite${
           error instanceof Error ? `: ${error.message}` : ''

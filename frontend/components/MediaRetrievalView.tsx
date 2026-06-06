@@ -269,7 +269,14 @@ function CreatorCard({ row, rank, signal }: { row: any; rank: number; signal?: s
 
 function VideoCard({ row, rank, signal }: { row: any; rank: number; signal?: string }) {
   const title = row.title || row.video_title || 'Untitled video'
-  const creator = row.creator || 'Unknown creator'
+  const creator =
+    row.creator ||
+    row.creator_name ||
+    row.channel_title ||
+    row.username ||
+    row.creator_id ||
+    'Unknown creator'
+  const url = row.url || row.video_url
   const rankLabel = rankingLabel(row)
   const rankVal = rankingValue(row)
   const platform = row.platform
@@ -287,9 +294,9 @@ function VideoCard({ row, rank, signal }: { row: any; rank: number; signal?: str
           <div className="text-[10px] font-semibold uppercase tracking-wider text-indigo-500 mb-0.5">
             #{rank}
           </div>
-          {row.url ? (
+          {url ? (
             <a
-              href={row.url}
+              href={url}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-start gap-1 text-base font-semibold text-indigo-700 hover:text-indigo-900 hover:underline"
@@ -424,6 +431,12 @@ function CountResultView({ row, defaultMinScore }: { row: any; defaultMinScore?:
   )
 }
 
+function formatTraceParamValue(val: unknown): string {
+  if (val == null) return '—'
+  if (typeof val === 'object') return JSON.stringify(val)
+  return String(val)
+}
+
 function TracePanel({
   trace,
   toolName,
@@ -443,7 +456,16 @@ function TracePanel({
   const warnings = trace?.warnings || []
   const degradedScan = Boolean(params.degraded_scan)
 
-  if (!steps.length && !notes.length && !toolName) return null
+  // Capsules: prefer tool_name/tool_inputs; fall back to trace.params after history reload.
+  const capsuleRetriever =
+    toolName || (typeof params.retriever === 'string' ? params.retriever : undefined)
+  const capsuleTheme =
+    toolInputs?.theme || (typeof params.theme === 'string' ? params.theme : undefined)
+  const capsuleSignal =
+    toolInputs?.signal ||
+    (typeof params.signal === 'string' ? params.signal : undefined)
+
+  if (!steps.length && !notes.length && !capsuleRetriever) return null
 
   return (
     <div className="rounded-xl border border-slate-200/80 bg-slate-50/50 overflow-hidden">
@@ -464,19 +486,19 @@ function TracePanel({
                 'Index size lookup failed. Only a small topic sample was searched; results may be incomplete. Retry the query.'}
             </div>
           )}
-          {toolName && (
+          {capsuleRetriever && (
             <div className="pt-3 flex flex-wrap gap-2 text-[11px]">
               <span className="rounded-full bg-white border border-slate-200 px-2.5 py-1 text-slate-600">
-                Retriever: {toolName}
+                Retriever: {capsuleRetriever}
               </span>
-              {toolInputs?.theme && (
+              {capsuleTheme && (
                 <span className="rounded-full bg-white border border-slate-200 px-2.5 py-1 text-slate-600">
-                  Theme: {toolInputs.theme}
+                  Theme: {capsuleTheme}
                 </span>
               )}
-              {toolInputs?.signal && (
+              {capsuleSignal && (
                 <span className="rounded-full bg-white border border-slate-200 px-2.5 py-1 text-slate-600">
-                  Signal: {String(toolInputs.signal).replace(/_/g, ' ')}
+                  Signal: {String(capsuleSignal).replace(/_/g, ' ')}
                 </span>
               )}
             </div>
@@ -517,18 +539,23 @@ function TracePanel({
                     </p>
                   )}
                   <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-                  {Object.entries(params).map(([key, val]) => (
-                    <div key={key} className="contents">
-                      <dt className="text-gray-400 capitalize">{key.replace(/_/g, ' ')}</dt>
-                      <dd
-                        className={`font-mono truncate ${
-                          key === 'degraded_scan' && val ? 'text-amber-700 font-semibold' : 'text-gray-700'
-                        }`}
-                      >
-                        {String(val)}
-                      </dd>
-                    </div>
-                  ))}
+                    {Object.entries(params).map(([key, val]) => (
+                      <div key={key} className="contents">
+                        <dt className="text-gray-400 capitalize">{key.replace(/_/g, ' ')}</dt>
+                        <dd
+                          className={`font-mono truncate ${
+                            key === 'degraded_scan' && val ? 'text-amber-700 font-semibold' : 'text-gray-700'
+                          }`}
+                        >
+                          {key === 'candidate_counts' && val && typeof val === 'object'
+                            ? Object.entries(val as Record<string, number>)
+                                .filter(([, n]) => n)
+                                .map(([kind, n]) => `${n} ${kind.replace(/_/g, ' ')}`)
+                                .join(' · ')
+                            : formatTraceParamValue(val)}
+                        </dd>
+                      </div>
+                    ))}
                   </dl>
                 </>
               )}
@@ -571,6 +598,78 @@ function isCreatorResult(results: any[]): boolean {
   if (!results.length || isVideoResult(results) || isCountResult(results)) return false
   const first = results[0]
   return !!(first.influencer_name || first.accounts || (first.creator && first.relevance != null && first.video_count != null))
+}
+
+function isHybridCountAnswer(results: any[]): boolean {
+  return (
+    results.length === 1 &&
+    results[0]?.count_field == null &&
+    (typeof results[0]?.creator_count === 'number' ||
+      typeof results[0]?.video_count === 'number')
+  )
+}
+
+function HybridCountAnswer({
+  row,
+  explanation,
+  candidateCounts,
+}: {
+  row: any
+  explanation?: string
+  candidateCounts?: Record<string, number>
+}) {
+  const isVideoCount = typeof row.video_count === 'number'
+  const count = isVideoCount ? row.video_count : (row.creator_count ?? 0)
+  const names = (
+    isVideoCount ? row.video_titles || [] : row.creator_names || []
+  ).filter((n: unknown) => typeof n === 'string' && n.trim().length > 0) as string[]
+  const yt = candidateCounts?.youtube_channel_ids ?? 0
+  const tt = candidateCounts?.tiktok_usernames ?? 0
+  const videos = candidateCounts?.video_ids ?? 0
+  return (
+    <div className="rounded-xl border border-indigo-100 bg-gradient-to-br from-white to-indigo-50/40 p-5 shadow-sm space-y-3">
+      {explanation && (
+        <p className="text-sm text-gray-600 leading-relaxed border-b border-indigo-50 pb-3">
+          {explanation}
+        </p>
+      )}
+      {(videos > 0 || yt > 0 || tt > 0) && (
+        <p className="text-xs text-gray-500">
+          Semantic pool searched:{' '}
+          {videos > 0 ? `${videos} videos` : null}
+          {videos > 0 && (yt > 0 || tt > 0) ? ' · ' : null}
+          {yt > 0 ? `${yt} YouTube channels` : null}
+          {yt > 0 && tt > 0 ? ' · ' : null}
+          {tt > 0 ? `${tt} TikTok accounts` : null}
+        </p>
+      )}
+      <div className="text-4xl font-bold text-indigo-600">{count}</div>
+      <div className="text-sm text-gray-700">
+        {isVideoCount
+          ? count === 1
+            ? 'video matches your question after the structural filter'
+            : 'videos match your question after the structural filter'
+          : count === 1
+            ? 'creator matches your question after the structural filter'
+            : 'creators match your question after the structural filter'}
+      </div>
+      {names.length > 0 ? (
+        <ul className="space-y-1 text-sm text-gray-800">
+          {names.map((name) => (
+            <li key={name} className="font-medium">
+              {name}
+            </li>
+          ))}
+        </ul>
+      ) : count > 0 ? (
+        <p className="text-xs text-gray-400 italic">
+          {isVideoCount
+            ? 'Video title not available in graph data.'
+            : 'Creator name not available in graph data.'}
+        </p>
+      ) : null}
+    </div>
+  )
 }
 
 function Stage2ResultsBody({
@@ -639,7 +738,6 @@ export default function MediaRetrievalView({
   candidateCounts,
 }: MediaRetrievalViewProps) {
   const isHybrid = routeType === 'hybrid_media'
-  const stage1Results = stage1?.results || stage1?.results_preview || []
   const deduped = dedupedByInfluencer ?? stage1?.deduped_by_influencer
   const signal = toolInputs?.signal as string | undefined
   const defaultMinScore =
@@ -657,7 +755,7 @@ export default function MediaRetrievalView({
     )
   }
 
-  const headerLabel = isHybrid ? 'Hybrid media results' : 'Media retrieval results'
+  const headerLabel = isHybrid ? 'Answer' : 'Media retrieval results'
 
   return (
     <div className="mt-4 space-y-4">
@@ -671,21 +769,6 @@ export default function MediaRetrievalView({
         )}
       </div>
 
-      {isHybrid && candidateCounts && Object.keys(candidateCounts).length > 0 && (
-        <div className="flex flex-wrap gap-2 text-[11px]">
-          {Object.entries(candidateCounts).map(([kind, count]) =>
-            count ? (
-              <span
-                key={kind}
-                className="rounded-full bg-amber-50 border border-amber-100 text-amber-800 px-2.5 py-1"
-              >
-                Stage 1 seeds: {count} {kind.replace(/_/g, ' ')}
-              </span>
-            ) : null
-          )}
-        </div>
-      )}
-
       <TracePanel
         trace={retrievalTrace}
         toolName={toolName}
@@ -694,41 +777,23 @@ export default function MediaRetrievalView({
       />
 
       {isHybrid ? (
-        <>
-          {stage1Results.length > 0 && (
+        results && results.length > 0 ? (
+          isHybridCountAnswer(results) ? (
+            <HybridCountAnswer
+              row={results[0]}
+              explanation={
+                typeof retrievalTrace?.params?.hybrid_explanation === 'string'
+                  ? retrievalTrace.params.hybrid_explanation
+                  : undefined
+              }
+              candidateCounts={
+                candidateCounts ??
+                (retrievalTrace?.params?.candidate_counts as Record<string, number> | undefined)
+              }
+            />
+          ) : (
             <CollapsibleResultsSection
-              title={`Stage 1 — Semantic candidates (${stage1Results.length})`}
-            >
-              {isCreatorResult(stage1Results) ? (
-                stage1Results.map((row, idx) => (
-                  <CreatorCard
-                    key={row.channel_id || row.creator || idx}
-                    row={row}
-                    rank={idx + 1}
-                    signal={signal}
-                  />
-                ))
-              ) : isVideoResult(stage1Results) ? (
-                stage1Results.map((row, idx) => (
-                  <VideoCard
-                    key={row.video_id || row.url || idx}
-                    row={row}
-                    rank={idx + 1}
-                    signal={signal}
-                  />
-                ))
-              ) : (
-                <Stage2ResultsBody
-                  results={stage1Results}
-                  signal={signal}
-                  defaultMinScore={defaultMinScore}
-                />
-              )}
-            </CollapsibleResultsSection>
-          )}
-          {results && results.length > 0 ? (
-            <CollapsibleResultsSection
-              title={`Stage 2 — Structural filter results (${results.length})`}
+              title={`Results (${results.length})`}
             >
               <Stage2ResultsBody
                 results={results}
@@ -736,12 +801,14 @@ export default function MediaRetrievalView({
                 defaultMinScore={defaultMinScore}
               />
             </CollapsibleResultsSection>
-          ) : (
-            <div className="text-sm text-gray-500 italic px-1">
-              Stage 2 returned no rows after applying the structural filter.
-            </div>
-          )}
-        </>
+          )
+        ) : (
+          <div className="text-sm text-gray-500 italic px-1">
+            {(candidateCounts?.video_ids ?? 0) > 0
+              ? 'No videos matched your question with the structural filter you specified.'
+              : 'No creators matched your question with the structural filter you specified.'}
+          </div>
+        )
       ) : isCountResult(results) ? (
         <CollapsibleResultsSection title={`Count results (${results.length})`}>
           {results.map((row, idx) => (

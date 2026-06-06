@@ -36,6 +36,9 @@ mcp[cli]>=1.11.0
 graphdatascience>=1.16
 neo4j>=5.28.1
 
+# MongoDB (chat sessions; also required for backend IDE/type checking)
+pymongo>=4.6.0
+
 # Documentation toolchain
 mkdocs>=1.6
 mkdocs-material>=9.5

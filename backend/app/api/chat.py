@@ -3,24 +3,56 @@
 from datetime import datetime
 import json
 import logging
+import threading
 from typing import Optional, List, Dict, Any, Literal
 from uuid import uuid4
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException  # pyright: ignore[reportMissingImports]
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Query  # pyright: ignore[reportMissingImports]
 from pydantic import BaseModel
 
 from backend.app.services.chat_sessions import (
-    append_chat_messages,
+    append_chat_metadata,
     ensure_allowed_username,
     fetch_chat_history,
     fetch_recent_messages,
     list_test_users,
     delete_chat_message,
+    maybe_prune_chat_session,
     set_message_favorite,
     set_message_feedback,
     get_favorite_messages,
 )
+from backend.app.services.chat_message_payloads import save_pending_payloads
+from utils.user_facing_errors import (
+    GENERIC_CHAT_FAILURE,
+    assistant_content,
+    sanitize_user_error,
+)
+
 router = APIRouter()
+
+
+def _save_payloads_safe(
+    username: str, pending: List[tuple[str, Dict[str, Any]]]
+) -> None:
+    """Persist heavy retrieval fields after the HTTP response has been sent."""
+    try:
+        save_pending_payloads(username, pending)
+    except Exception as exc:
+        logging.error("Failed to save chat payloads for %s: %s", username, exc)
+
+
+def _maybe_prune_session_safe(username: str) -> None:
+    """Shrink oversized session docs without blocking the chat response."""
+    try:
+        maybe_prune_chat_session(username)
+    except Exception as exc:
+        logging.error("Failed to prune chat session for %s: %s", username, exc)
+
+
+def _schedule_daemon(target, *args: Any) -> None:
+    """Fire-and-forget background work without blocking uvicorn reload/shutdown."""
+    threading.Thread(target=target, args=args, daemon=True).start()
 
 
 def _get_graphrag_service():
@@ -53,6 +85,7 @@ class ChatMessage(BaseModel):
     per_platform: Optional[Dict[str, Any]] = None
     stage1: Optional[Dict[str, Any]] = None
     candidate_counts: Optional[Dict[str, int]] = None
+    hybrid_audit: Optional[Dict[str, Any]] = None
 
 
 class ChatHistoryResponse(BaseModel):
@@ -102,6 +135,7 @@ class ChatResponse(BaseModel):
     per_platform: Optional[Dict[str, Any]] = None
     stage1: Optional[Dict[str, Any]] = None
     candidate_counts: Optional[Dict[str, int]] = None
+    hybrid_audit: Optional[Dict[str, Any]] = None
 
 
 class FavoriteRequest(BaseModel):
@@ -126,14 +160,17 @@ async def list_chat_users():
 
 
 @router.get("/chat/history/{username}", response_model=ChatHistoryResponse)
-async def get_chat_history(username: str):
+async def get_chat_history(
+    username: str,
+    limit: int = Query(120, ge=1, le=500, description="Max messages to return (most recent)"),
+):
     """Return stored chat history for a tester."""
     try:
         normalized = ensure_allowed_username(username)
     except ValueError as exc:
         raise HTTPException(status_code=403, detail=str(exc))
 
-    history = fetch_chat_history(normalized)
+    history = fetch_chat_history(normalized, limit=limit)
     for msg in history.get("messages", []):
         timings = msg.get("timings")
         if isinstance(timings, dict):
@@ -200,36 +237,49 @@ async def list_favorites(username: str):
 async def submit_feedback(request: FeedbackSubmitRequest):
     """Store user feedback (thumbs up/down + optional comment) and send email notification."""
     from backend.app.services.feedback import store_feedback, send_feedback_email
+    from backend.app.services.chat_message_payloads import get_merged_assistant_message
 
     if request.rating not in ("up", "down"):
         raise HTTPException(status_code=400, detail="rating must be 'up' or 'down'")
 
     try:
-        ensure_allowed_username(request.username)
+        normalized = ensure_allowed_username(request.username)
     except ValueError as exc:
         raise HTTPException(status_code=403, detail=str(exc))
 
+    merged = get_merged_assistant_message(normalized, request.message_id)
+    retrieval_results = merged.get("results") if merged else None
+    per_platform = merged.get("per_platform") if merged else None
+    stage1 = merged.get("stage1") if merged else None
+    route_type = request.route_type or (merged.get("route_type") if merged else None)
+
     store_feedback(
         message_id=request.message_id,
-        username=request.username,
+        username=normalized,
         rating=request.rating,
         comment=request.comment,
         question=request.question,
         answer=request.answer,
         cypher=request.cypher,
-        route_type=request.route_type,
+        route_type=route_type,
+        retrieval_results=retrieval_results,
+        per_platform=per_platform,
+        stage1=stage1,
     )
 
-    set_message_feedback(request.username, request.message_id, request.rating)
+    set_message_feedback(normalized, request.message_id, request.rating)
 
     await send_feedback_email(
         rating=request.rating,
-        username=request.username,
+        username=normalized,
         question=request.question,
         answer=request.answer,
         cypher=request.cypher,
         comment=request.comment,
-        route_type=request.route_type,
+        route_type=route_type,
+        retrieval_results=retrieval_results,
+        per_platform=per_platform,
+        stage1=stage1,
     )
 
     return {"message": "Feedback submitted successfully"}
@@ -255,6 +305,7 @@ async def chat(request: ChatRequest):
             "is_favorite": False,
         }
     ]
+    pending_payloads: List[tuple[str, Dict[str, Any]]] = []
 
     try:
         result = await _get_graphrag_service().process_question(
@@ -264,39 +315,47 @@ async def chat(request: ChatRequest):
             conversation_history=recent_history,
         )
 
-        error_msg = result.get("error")
-        if error_msg:
-            logging.warning(f"Chat API: Error in result: {error_msg}")
-            content = error_msg
-            result["summary"] = None
-        else:
-            content = result.get("summary") or "Query executed successfully"
+        raw_error = result.get("error")
+        if raw_error:
+            logging.warning("Chat API: internal error in result (sanitized for user): %s", raw_error)
+        error_msg = sanitize_user_error(
+            raw_error,
+            summary=result.get("summary"),
+            route_type=result.get("route_type"),
+        )
+        content = assistant_content(
+            error=raw_error,
+            summary=result.get("summary"),
+            route_type=result.get("route_type"),
+        )
 
         assistant_message = {
             "id": str(uuid4()),
             "role": "assistant",
             "content": content,
-            "route_type": None if error_msg else result.get("route_type"),
+            "route_type": result.get("route_type"),
             "cypher": result.get("cypher"),
-            "tool_name": None if error_msg else result.get("tool_name"),
-            "tool_inputs": None if error_msg else result.get("tool_inputs"),
-            "results": None if error_msg else result.get("results"),
-            "summary": None if error_msg else result.get("summary"),
-            "examples": None if error_msg else result.get("examples_used"),
-            "visualization": None if error_msg else result.get("visualization"),
+            "tool_name": result.get("tool_name"),
+            "tool_inputs": result.get("tool_inputs"),
+            "results": result.get("results"),
+            "summary": result.get("summary"),
+            "examples": result.get("examples_used"),
+            "visualization": result.get("visualization"),
             "error": error_msg,
             "timestamp": datetime.utcnow(),
             "is_favorite": False,
-            "timings": None if error_msg else result.get("timings"),
-            "retrieval_trace": None if error_msg else result.get("retrieval_trace"),
-            "research_notes": None if error_msg else result.get("research_notes"),
-            "status": None if error_msg else result.get("status"),
-            "deduped_by_influencer": None if error_msg else result.get("deduped_by_influencer"),
-            "per_platform": None if error_msg else result.get("per_platform"),
-            "stage1": None if error_msg else result.get("stage1"),
-            "candidate_counts": None if error_msg else result.get("candidate_counts"),
+            "timings": result.get("timings"),
+            "retrieval_trace": result.get("retrieval_trace"),
+            "research_notes": result.get("research_notes"),
+            "status": result.get("status"),
+            "deduped_by_influencer": result.get("deduped_by_influencer"),
+            "per_platform": result.get("per_platform"),
+            "stage1": result.get("stage1"),
+            "candidate_counts": result.get("candidate_counts"),
+            "hybrid_audit": result.get("hybrid_audit"),
         }
         history_messages.append(assistant_message)
+        pending_payloads = append_chat_metadata(username, history_messages)
 
         if error_msg:
             response_data = {
@@ -332,6 +391,7 @@ async def chat(request: ChatRequest):
                 "per_platform": result.get("per_platform"),
                 "stage1": result.get("stage1"),
                 "candidate_counts": result.get("candidate_counts"),
+                "hybrid_audit": result.get("hybrid_audit"),
                 "message_id": assistant_message["id"],
             }
         return ChatResponse(**response_data)
@@ -342,21 +402,24 @@ async def chat(request: ChatRequest):
         error_message = {
             "id": str(uuid4()),
             "role": "assistant",
-            "content": f"Error: {str(e)}",
-            "error": str(e),
+            "content": GENERIC_CHAT_FAILURE,
+            "error": None,
             "timestamp": datetime.utcnow(),
             "is_favorite": False,
         }
         history_messages.append(error_message)
-        # Return error response instead of raising HTTPException to show error in UI
+        pending_payloads = append_chat_metadata(username, history_messages)
         return ChatResponse(
             username=username,
             question=request.question,
-            error=str(e),
+            summary=GENERIC_CHAT_FAILURE,
             message_id=error_message["id"],
         )
     finally:
-        append_chat_messages(username, history_messages)
+        if pending_payloads:
+            _schedule_daemon(_save_payloads_safe, username, pending_payloads)
+        if pending_payloads or history_messages:
+            _schedule_daemon(_maybe_prune_session_safe, username)
 
 
 @router.websocket("/chat/stream")

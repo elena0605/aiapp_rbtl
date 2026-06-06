@@ -1,7 +1,7 @@
 """YouTube media retrievers.
 
 13 retrievers ported from
-``/Users/elenasimoska/airflow_upgrade/notebooks/youtube_prod_comment_summary_embeddings.ipynb``.
+``/Users/bojansimoski/airflow_upgrade/notebooks/youtube_prod_comment_summary_embeddings.ipynb``.
 
 Each retriever:
 - Resolves an embedding query via its family template (see ``base.FAMILY_TEMPLATES``).
@@ -23,11 +23,13 @@ from typing import Any, Dict, List, Optional, Tuple
 from utils.neo4j import get_session
 
 from .base import (
+    MEDIA_RETRIEVER_COUNT_SAMPLE_LIMIT,
     MEDIA_RETRIEVER_TOP_N,
     RetrieverConfig,
     RetrieverResult,
     _empty_result,
     prepare_query,
+    run_neo4j_query,
 )
 
 logger = logging.getLogger("MediaRetrievers.YouTube")
@@ -478,7 +480,7 @@ def _run_ranked(
     )
 
     with get_session() as session:
-        rows = [_safe_dict(r) for r in session.run(cypher, **params)]
+        rows = [_safe_dict(r) for r in run_neo4j_query(session, cypher, **params)]
 
     if not rows:
         return _empty_result(
@@ -550,7 +552,7 @@ def _run_count(
     )
 
     with get_session() as session:
-        record = session.run(cypher, **params).single()
+        record = run_neo4j_query(session, cypher, **params).single()
 
     if record is None:
         return _empty_result(
@@ -566,21 +568,25 @@ def _run_count(
         )
 
     count = int(record.get(count_field) or 0)
-    samples = list(record.get(sample_field) or [])
+    raw_samples = list(record.get(sample_field) or [])
+    samples = raw_samples
+    if len(samples) > MEDIA_RETRIEVER_COUNT_SAMPLE_LIMIT:
+        samples = samples[:MEDIA_RETRIEVER_COUNT_SAMPLE_LIMIT]
     max_observed = record.get("max_observed_score")
     max_observed_f = float(max_observed) if max_observed is not None else None
 
+    # Hybrid Stage 2 needs every ID above threshold, not just display samples.
     candidate_keys: Dict[str, List[Any]] = {}
-    if config.output_kind == "count" and config.signal == "topic":
-        ids = [s.get("channel_id") for s in samples if s.get("channel_id")]
-        if ids:
-            candidate_keys["youtube_channel_ids"] = list(dict.fromkeys(ids))
-    elif sample_field == "sample_videos":
-        vids = [s.get("video_id") for s in samples if s.get("video_id") is not None]
+    if sample_field == "sample_videos":
+        vids = [
+            s.get("video_id")
+            for s in raw_samples
+            if s.get("video_id") is not None
+        ]
         if vids:
             candidate_keys["video_ids"] = list(dict.fromkeys(vids))
     elif sample_field == "sample_creators":
-        ids = [s.get("channel_id") for s in samples if s.get("channel_id")]
+        ids = [s.get("channel_id") for s in raw_samples if s.get("channel_id")]
         if ids:
             candidate_keys["youtube_channel_ids"] = list(dict.fromkeys(ids))
 
@@ -780,6 +786,193 @@ def _run_count_videos_by_content(config, theme, *, min_score=None, **_):
     )
 
 
+_CREATOR_CHANNEL_IDS_BY_TOPIC_CYPHER = """
+CALL db.index.vector.queryNodes($index, $k, $q) YIELD node AS t, score
+WHERE coalesce(t.platform, 'youtube') = $platform
+  AND score >= $min_score
+MATCH (v:YouTubeVideo)-[rel:HAS_COMMENT_TOPIC]->(t)
+WHERE coalesce(rel.platform, 'youtube') = $platform
+OPTIONAL MATCH (c:YouTubeChannel)-[hv:HAS_VIDEO]->(v)
+WHERE coalesce(hv.platform, "YouTube") = "YouTube"
+WITH DISTINCT coalesce(c.channel_id, v.channel_id) AS channel_id
+WHERE channel_id IS NOT NULL
+RETURN collect(channel_id) AS ids
+"""
+
+_CREATOR_CHANNEL_IDS_BY_CONTENT_CYPHER = """
+CALL db.index.vector.queryNodes($index, $k, $q) YIELD node AS v, score
+WHERE score >= $min_score
+OPTIONAL MATCH (c:YouTubeChannel)-[hv:HAS_VIDEO]->(v)
+WHERE coalesce(hv.platform, "YouTube") = "YouTube"
+WITH DISTINCT coalesce(c.channel_id, v.channel_id) AS channel_id
+WHERE channel_id IS NOT NULL
+RETURN collect(channel_id) AS ids
+"""
+
+_VIDEO_IDS_BY_TOPIC_CYPHER = """
+CALL db.index.vector.queryNodes($index, $k, $q) YIELD node AS t, score
+WHERE coalesce(t.platform, 'youtube') = $platform
+  AND score >= $min_score
+MATCH (v:YouTubeVideo)-[rel:HAS_COMMENT_TOPIC]->(t)
+WHERE coalesce(rel.platform, 'youtube') = $platform
+WITH DISTINCT v
+RETURN collect(v.video_id) AS ids
+"""
+
+_VIDEO_IDS_BY_COMMENT_SUMMARY_CYPHER = """
+CALL db.index.vector.queryNodes($index, $k, $q) YIELD node AS v, score
+WHERE score >= $min_score
+WITH DISTINCT v
+RETURN collect(v.video_id) AS ids
+"""
+
+_VIDEO_IDS_BY_CONTENT_CYPHER = """
+CALL db.index.vector.queryNodes($index, $k, $q) YIELD node AS v, score
+WHERE score >= $min_score
+WITH DISTINCT v
+RETURN collect(v.video_id) AS ids
+"""
+
+
+_CREATOR_ROWS_FOR_CHANNEL_IDS_BY_CONTENT_CYPHER = """
+CALL db.index.vector.queryNodes($index, $k, $q) YIELD node AS v, score
+WHERE score >= $min_score
+OPTIONAL MATCH (c:YouTubeChannel)-[hv:HAS_VIDEO]->(v)
+WHERE coalesce(hv.platform, "YouTube") = "YouTube"
+WITH coalesce(c.title, v.channel_title, v.username, 'unknown') AS creator,
+     coalesce(c.channel_id, v.channel_id) AS channel_id,
+     v, score
+WHERE channel_id IN $channel_ids
+WITH creator, channel_id,
+     sum(score) AS relevance,
+     max(score) AS max_score,
+     count(DISTINCT v) AS video_count,
+     collect({video_id: v.video_id, title: v.video_title, url: v.video_url, score: score}) AS sample_videos
+RETURN creator, channel_id, relevance, max_score, video_count, sample_videos
+ORDER BY relevance DESC
+"""
+
+_CREATOR_ROWS_FOR_CHANNEL_IDS_BY_TOPIC_CYPHER = """
+CALL db.index.vector.queryNodes($index, $k, $q) YIELD node AS t, score
+WHERE coalesce(t.platform, 'youtube') = $platform
+  AND score >= $min_score
+MATCH (v:YouTubeVideo)-[rel:HAS_COMMENT_TOPIC]->(t)
+WHERE coalesce(rel.platform, 'youtube') = $platform
+OPTIONAL MATCH (c:YouTubeChannel)-[hv:HAS_VIDEO]->(v)
+WHERE coalesce(hv.platform, "YouTube") = "YouTube"
+WITH
+  coalesce(c.title, v.channel_title, v.username, 'unknown') AS creator,
+  coalesce(c.channel_id, v.channel_id) AS channel_id,
+  t, v, rel, score
+WHERE channel_id IN $channel_ids
+WITH
+  creator,
+  channel_id,
+  sum(score * coalesce(rel.weight, 1.0)) AS relevance,
+  max(score * coalesce(rel.weight, 1.0)) AS best_weighted_score,
+  max(score) AS max_score,
+  count(DISTINCT v) AS video_count,
+  collect(DISTINCT t.name) AS sample_topics,
+  collect(DISTINCT {video_id: v.video_id, title: v.video_title, url: v.video_url}) AS sample_videos
+RETURN creator, channel_id, relevance, best_weighted_score, max_score,
+       video_count, sample_topics, sample_videos
+ORDER BY relevance DESC
+"""
+
+
+def fetch_creator_rows_for_channel_ids(
+    config: RetrieverConfig,
+    theme: str,
+    channel_ids: List[str],
+    *,
+    min_score: Optional[float] = None,
+) -> List[Dict[str, Any]]:
+    """Semantic metadata for specific channels (hybrid Stage 2 hydration)."""
+    ids = [str(c) for c in channel_ids if c]
+    if not ids:
+        return []
+
+    if config.signal == "content":
+        cypher = _CREATOR_ROWS_FOR_CHANNEL_IDS_BY_CONTENT_CYPHER
+        pass_platform = False
+        score_keys: Tuple[str, ...] = ("relevance", "max_score", "video_count")
+    else:
+        cypher = _CREATOR_ROWS_FOR_CHANNEL_IDS_BY_TOPIC_CYPHER
+        pass_platform = True
+        score_keys = (
+            "relevance",
+            "best_weighted_score",
+            "max_score",
+            "video_count",
+        )
+
+    ctx = prepare_query(config, theme, explicit_min_score=min_score)
+    params: Dict[str, Any] = {
+        "index": config.index_name,
+        "q": ctx["embedding"],
+        "k": ctx["k"],
+        "min_score": ctx["min_score"],
+        "channel_ids": ids,
+    }
+    if pass_platform:
+        params["platform"] = PLATFORM
+
+    with get_session() as session:
+        rows = [_safe_dict(r) for r in run_neo4j_query(session, cypher, **params)]
+
+    if not rows:
+        return []
+    results, _ = _build_creator_results(
+        rows, ranking_key="relevance", score_keys=score_keys
+    )
+    return results
+
+
+def collect_threshold_candidate_ids(
+    config: RetrieverConfig,
+    theme: str,
+    *,
+    id_kind: str,
+    min_score: Optional[float] = None,
+) -> List[str]:
+    """Return every YouTube channel_id or video_id above ``min_score`` for hybrid Stage 2."""
+    signal = config.signal
+    if id_kind in {"creators", "count_creators"}:
+        cypher = (
+            _CREATOR_CHANNEL_IDS_BY_CONTENT_CYPHER
+            if signal == "content"
+            else _CREATOR_CHANNEL_IDS_BY_TOPIC_CYPHER
+        )
+        pass_platform = signal != "content"
+    elif id_kind in {"videos", "count_videos"}:
+        if signal == "comment_summary":
+            cypher = _VIDEO_IDS_BY_COMMENT_SUMMARY_CYPHER
+        elif signal == "content":
+            cypher = _VIDEO_IDS_BY_CONTENT_CYPHER
+        else:
+            cypher = _VIDEO_IDS_BY_TOPIC_CYPHER
+        pass_platform = signal == "topic"
+    else:
+        return []
+
+    ctx = prepare_query(config, theme, explicit_min_score=min_score)
+    params: Dict[str, Any] = {
+        "index": config.index_name,
+        "q": ctx["embedding"],
+        "k": ctx["k"],
+        "min_score": ctx["min_score"],
+    }
+    if pass_platform:
+        params["platform"] = PLATFORM
+
+    with get_session() as session:
+        record = run_neo4j_query(session, cypher, **params).single()
+
+    if record is None:
+        return []
+    return [str(v) for v in (record.get("ids") or []) if v is not None]
+
+
 def _rrf_rank(rows: List[Dict[str, Any]], k_const: int = 60) -> Dict[str, float]:
     """Reciprocal Rank Fusion — robust to differing score scales across indexes."""
     scores: Dict[str, float] = {}
@@ -798,19 +991,28 @@ def _run_unified_search(config, theme, *, top_n=None, min_score=None, **_):
     with get_session() as session:
         content_rows = [
             _safe_dict(r)
-            for r in session.run(
-                _UNIFIED_CONTENT_Q, q=ctx["embedding"], k=ctx["k"], min_score=ctx["min_score"]
+            for r in run_neo4j_query(
+                session,
+                _UNIFIED_CONTENT_Q,
+                q=ctx["embedding"],
+                k=ctx["k"],
+                min_score=ctx["min_score"],
             )
         ]
         summary_rows = [
             _safe_dict(r)
-            for r in session.run(
-                _UNIFIED_SUMMARY_Q, q=ctx["embedding"], k=ctx["k"], min_score=ctx["min_score"]
+            for r in run_neo4j_query(
+                session,
+                _UNIFIED_SUMMARY_Q,
+                q=ctx["embedding"],
+                k=ctx["k"],
+                min_score=ctx["min_score"],
             )
         ]
         topic_rows = [
             _safe_dict(r)
-            for r in session.run(
+            for r in run_neo4j_query(
+                session,
                 _UNIFIED_TOPIC_Q,
                 q=ctx["embedding"],
                 k=ctx["k"],
@@ -850,7 +1052,7 @@ def _run_unified_search(config, theme, *, top_n=None, min_score=None, **_):
         top_ids = sorted(fused, key=lambda x: fused[x], reverse=True)[: ctx["top_n"]]
         hydrated = {
             r["video_id"]: _safe_dict(r)
-            for r in session.run(_UNIFIED_HYDRATE, video_ids=top_ids)
+            for r in run_neo4j_query(session, _UNIFIED_HYDRATE, video_ids=top_ids)
         }
 
     results: List[Dict[str, Any]] = []

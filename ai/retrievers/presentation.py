@@ -8,6 +8,7 @@ researchers validating relevance — without extra LLM calls.
 from __future__ import annotations
 
 import os
+import re
 from collections import Counter
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
@@ -608,6 +609,303 @@ def enrich_video_results(
     ]
 
 
+def _normalize_hybrid_stage2_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Map Stage 2 Cypher aliases to the media-retrieval row shape the UI expects."""
+    out = dict(row)
+    out["title"] = out.get("title") or out.get("video_title")
+    out["url"] = out.get("url") or out.get("video_url")
+    out["creator"] = (
+        out.get("creator")
+        or out.get("creator_name")
+        or out.get("channel_title")
+        or out.get("username")
+        or out.get("channel_username")
+        or out.get("tiktok_username")
+    )
+    out["channel_id"] = (
+        out.get("channel_id")
+        or out.get("creator_id")
+        or out.get("account_id")
+    )
+    if not out.get("username"):
+        out["username"] = out.get("tiktok_username") or out.get("channel_username")
+    if not out.get("influencer_name") and out.get("creator_name"):
+        out["influencer_name"] = out.get("creator_name")
+    platform = out.get("platform")
+    if isinstance(platform, str):
+        out["platform"] = platform.lower()
+    elif out.get("channel_id") and str(out["channel_id"]).startswith("UC"):
+        out["platform"] = "youtube"
+    return out
+
+
+def _flatten_stage1_index_rows(
+    stage1_results: List[Dict[str, Any]],
+    per_platform: Optional[Dict[str, Any]] = None,
+) -> List[Dict[str, Any]]:
+    """Flatten merged Stage 1 rows, per-platform results, and nested accounts."""
+    flat: List[Dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def _append(row: Dict[str, Any], *, key_hint: str = "") -> None:
+        if not row:
+            return
+        dedupe_key = key_hint or str(
+            row.get("channel_id")
+            or row.get("username")
+            or row.get("creator")
+            or row.get("creator_name")
+            or row.get("influencer_name")
+            or id(row)
+        )
+        if dedupe_key in seen:
+            return
+        seen.add(dedupe_key)
+        flat.append(row)
+
+    for row in stage1_results:
+        if not isinstance(row, dict):
+            continue
+        _append(row)
+        for acc in row.get("accounts") or []:
+            if not isinstance(acc, dict):
+                continue
+            merged = dict(row)
+            merged.update(acc)
+            _append(
+                merged,
+                key_hint=str(acc.get("channel_id") or acc.get("username") or ""),
+            )
+
+    for plat_data in (per_platform or {}).values():
+        if not isinstance(plat_data, dict):
+            continue
+        for row in plat_data.get("results") or []:
+            if isinstance(row, dict):
+                _append(row)
+
+    return flat
+
+
+def _index_stage1_results(
+    stage1_results: List[Dict[str, Any]],
+) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
+    """Index Stage 1 preview rows by video_id and account id for hybrid merge."""
+    by_video: Dict[str, Dict[str, Any]] = {}
+    by_account: Dict[str, Dict[str, Any]] = {}
+    for row in stage1_results:
+        video_id = row.get("video_id")
+        if video_id is not None:
+            by_video[str(video_id)] = row
+        for key in (
+            "channel_id",
+            "username",
+            "creator",
+            "creator_name",
+            "influencer_name",
+            "channel_title",
+            "channel_username",
+            "tiktok_username",
+            "account_id",
+        ):
+            val = row.get(key)
+            if val:
+                by_account[str(val)] = row
+    return by_video, by_account
+
+
+def _needs_hybrid_semantic_hydration(row: Dict[str, Any]) -> bool:
+    if row.get("relevance") is not None or row.get("score") is not None:
+        return False
+    return not collect_sample_videos(row)
+
+
+def _resolve_youtube_creator_config(retriever_name: Optional[str]):
+    from .youtube import build_configs
+
+    base = _hybrid_stage1_retriever_name(retriever_name)
+    if base.startswith("all."):
+        base = "youtube." + base[len("all.") :]
+    configs = {c.name: c for c in build_configs()}
+    return configs.get(base) or configs.get("youtube.content_top_creators")
+
+
+def _resolve_tiktok_creator_config(retriever_name: Optional[str]):
+    from .tiktok import build_configs
+
+    base = _hybrid_stage1_retriever_name(retriever_name)
+    if base.startswith("all."):
+        base = "tiktok." + base[len("all.") :]
+    configs = {c.name: c for c in build_configs()}
+    return configs.get(base) or configs.get("tiktok.content_top_creators")
+
+
+def _fetch_hybrid_semantic_metadata(
+    *,
+    theme: str,
+    retriever_name: Optional[str],
+    min_score: Optional[float],
+    youtube_channel_ids: List[str],
+    tiktok_usernames: List[str],
+) -> Dict[str, Dict[str, Any]]:
+    """Load semantic scores/sample videos for Stage 2 rows missing Stage 1 rows."""
+    index: Dict[str, Dict[str, Any]] = {}
+    if youtube_channel_ids:
+        from .youtube import fetch_creator_rows_for_channel_ids
+
+        cfg = _resolve_youtube_creator_config(retriever_name)
+        if cfg:
+            for row in fetch_creator_rows_for_channel_ids(
+                cfg,
+                theme,
+                youtube_channel_ids,
+                min_score=min_score,
+            ):
+                cid = row.get("channel_id")
+                if cid:
+                    index[f"yt:{cid}"] = row
+    if tiktok_usernames:
+        from .tiktok import fetch_creator_rows_for_usernames
+
+        cfg = _resolve_tiktok_creator_config(retriever_name)
+        if cfg:
+            for row in fetch_creator_rows_for_usernames(
+                cfg,
+                theme,
+                tiktok_usernames,
+                min_score=min_score,
+            ):
+                uname = row.get("username")
+                if uname:
+                    index[f"tt:{uname}"] = row
+    return index
+
+
+def _merge_hybrid_stage1_seed(
+    base: Dict[str, Any],
+    *,
+    by_video: Dict[str, Dict[str, Any]],
+    by_account: Dict[str, Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Overlay Stage 2 structural fields onto the full Stage 1 semantic row."""
+    base = _normalize_hybrid_stage2_row(base)
+    video_id = base.get("video_id")
+    if video_id is not None and str(video_id) in by_video:
+        merged = dict(by_video[str(video_id)])
+        for key, value in base.items():
+            if value is not None and value != "":
+                merged[key] = value
+        return _normalize_hybrid_stage2_row(merged)
+
+    for lookup in (
+        base.get("channel_id"),
+        base.get("creator_id"),
+        base.get("account_id"),
+        base.get("username"),
+        base.get("creator"),
+        base.get("creator_name"),
+        base.get("influencer_name"),
+    ):
+        if lookup and str(lookup) in by_account:
+            merged = dict(by_account[str(lookup)])
+            for key, value in base.items():
+                if value is not None and value != "":
+                    merged[key] = value
+            return _normalize_hybrid_stage2_row(merged)
+    return base
+
+
+def enrich_hybrid_stage2_results(
+    rows: List[Dict[str, Any]],
+    *,
+    stage1_results: List[Dict[str, Any]],
+    signal: str,
+    theme: str,
+    retriever_name: Optional[str] = None,
+    per_platform: Optional[Dict[str, Any]] = None,
+    min_score: Optional[float] = None,
+) -> List[Dict[str, Any]]:
+    """Merge Stage 2 structural rows with Stage 1 semantic metadata for the UI."""
+    if not rows or _is_count_result(rows):
+        return rows
+
+    index_rows = _flatten_stage1_index_rows(stage1_results, per_platform)
+    by_video, by_account = _index_stage1_results(index_rows)
+    merged_rows: List[Dict[str, Any]] = [
+        _merge_hybrid_stage1_seed(row, by_video=by_video, by_account=by_account)
+        for row in rows
+    ]
+
+    missing_yt: List[str] = []
+    missing_tt: List[str] = []
+    for base in merged_rows:
+        if not _needs_hybrid_semantic_hydration(base):
+            continue
+        plat = str(base.get("platform") or "").lower()
+        cid = base.get("channel_id")
+        uname = base.get("username") or base.get("tiktok_username")
+        if plat == "tiktok" and uname:
+            missing_tt.append(str(uname))
+        elif cid:
+            missing_yt.append(str(cid))
+
+    if missing_yt or missing_tt:
+        hydrated = _fetch_hybrid_semantic_metadata(
+            theme=theme,
+            retriever_name=retriever_name,
+            min_score=min_score,
+            youtube_channel_ids=list(dict.fromkeys(missing_yt)),
+            tiktok_usernames=list(dict.fromkeys(missing_tt)),
+        )
+        for i, base in enumerate(merged_rows):
+            if not _needs_hybrid_semantic_hydration(base):
+                continue
+            plat = str(base.get("platform") or "").lower()
+            key = (
+                f"tt:{base.get('username') or base.get('tiktok_username')}"
+                if plat == "tiktok"
+                else f"yt:{base.get('channel_id')}"
+            )
+            seed = hydrated.get(key)
+            if seed:
+                merged = dict(seed)
+                for k, value in base.items():
+                    if value is not None and value != "":
+                        merged[k] = value
+                merged_rows[i] = _normalize_hybrid_stage2_row(merged)
+
+    enriched: List[Dict[str, Any]] = []
+    for base in merged_rows:
+        if _is_video_result([base]) or base.get("video_id"):
+            enriched.append(
+                enrich_video_row(
+                    base,
+                    signal=signal,
+                    theme=theme,
+                    retriever_name=retriever_name,
+                )
+            )
+        else:
+            enriched.append(
+                enrich_creator_row(
+                    base,
+                    signal=signal,
+                    theme=theme,
+                    retriever_name=retriever_name,
+                )
+            )
+
+    def _sort_key(item: Dict[str, Any]) -> float:
+        for key in ("relevance", "score", "engagement_score", "fused_score"):
+            val = item.get(key)
+            if isinstance(val, (int, float)):
+                return float(val)
+        return -1.0
+
+    enriched.sort(key=_sort_key, reverse=True)
+    return enriched
+
+
 def _is_count_result(rows: List[Dict[str, Any]]) -> bool:
     if not rows:
         return False
@@ -1097,11 +1395,288 @@ def present_media_result(
     )
 
 
-HYBRID_RESEARCH_NOTES: List[str] = RESEARCH_NOTES + [
-    "Hybrid results apply a structural graph filter (area, age, gender, etc.) "
-    "on top of semantically matched candidates from Stage 1.",
-    "Stage 2 Cypher never re-runs vector search — it only narrows the Stage 1 seed set.",
+HYBRID_AUDIT_MAX_IDS = 250
+
+
+def _cap_audit_id_list(values: List[Any]) -> List[str]:
+    """Stringify and cap ID lists stored for hybrid debugging in Mongo."""
+    cleaned = [str(v) for v in values if v is not None and str(v).strip()]
+    if len(cleaned) <= HYBRID_AUDIT_MAX_IDS:
+        return cleaned
+    omitted = len(cleaned) - HYBRID_AUDIT_MAX_IDS
+    return cleaned[:HYBRID_AUDIT_MAX_IDS] + [f"... +{omitted} more (truncated)"]
+
+
+def build_hybrid_audit(
+    *,
+    candidate_keys: Optional[Dict[str, List[Any]]],
+    candidate_counts: Optional[Dict[str, int]],
+    stage2_cypher: Optional[str],
+    stage2_params: Optional[Dict[str, Any]],
+    stage1_retriever: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Compact audit blob for hybrid runs (persisted to chat_message_payloads)."""
+    keys_in = candidate_keys or {}
+    keys_out: Dict[str, List[str]] = {}
+    for kind, vals in keys_in.items():
+        if isinstance(vals, list):
+            keys_out[kind] = _cap_audit_id_list(vals)
+
+    params_out: Dict[str, Any] = {}
+    for key, vals in (stage2_params or {}).items():
+        if isinstance(vals, list):
+            params_out[key] = _cap_audit_id_list(vals)
+        elif vals is not None:
+            params_out[key] = vals
+
+    return {
+        "stage1_retriever": stage1_retriever,
+        "candidate_keys": keys_out,
+        "candidate_counts": dict(candidate_counts or {}),
+        "stage2_cypher": stage2_cypher,
+        "stage2_params": params_out,
+    }
+
+
+HYBRID_RESEARCH_NOTES: List[str] = [
+    "This answer uses two steps: (1) find creators or videos whose content or "
+    "audience discussions match your topic, then (2) filter or rank them by "
+    "who follows the relevant creators in the graph (location, gender, platform, etc.).",
+    "Semantic matching uses AI embeddings over indexed media text — not keyword search.",
+    "The location/demographic filter uses survey-linked follower data in the graph "
+    "(who follows whom, where people live).",
 ]
+
+
+def _match_geo_name(question: str) -> Optional[str]:
+    try:
+        from ai.terminology.loader import load as load_terminology
+
+        data = load_terminology("v1") or {}
+        geo = data.get("geography") or {}
+        areas = list(geo.get("area_names") or [])
+        munis = list(geo.get("municipality_names") or [])
+        q_lower = question.lower()
+        for name in sorted(areas + munis, key=len, reverse=True):
+            if name.lower() in q_lower:
+                return name
+    except Exception:
+        pass
+    return None
+
+
+def _demographic_label(question: str) -> Optional[str]:
+    q_lower = question.lower()
+    if re.search(r"\b(girls?|females?|women)\b", q_lower):
+        return "girls"
+    if re.search(r"\b(boys?|males?|men)\b", q_lower):
+        return "boys"
+    return None
+
+
+def _explicit_platform_label(question: str) -> Optional[str]:
+    q_lower = question.lower()
+    yt = bool(re.search(r"\b(youtube|youtuber)s?\b", q_lower))
+    tt = bool(re.search(r"\b(tiktok|tiktoker)s?\b", q_lower))
+    if yt and not tt:
+        return "YouTube"
+    if tt and not yt:
+        return "TikTok"
+    return None
+
+
+def _hybrid_wants_count(question: str) -> bool:
+    return bool(re.search(r"\bhow many\b", question, re.IGNORECASE))
+
+
+def _hybrid_stage2_action(question: str) -> str:
+    """How Stage 2 is described — not how results are sorted in the UI."""
+    if _hybrid_wants_count(question):
+        return "counted"
+    if re.search(
+        r"\b(most popular|most followed|highest|top\s+\d+|rank(?:ed)?)\b",
+        question,
+        re.IGNORECASE,
+    ):
+        return "ranked"
+    return "filtered"
+
+
+def _hybrid_stage2_action_label(action: str) -> str:
+    return {
+        "counted": "Counted",
+        "ranked": "Ranked",
+        "filtered": "Filtered",
+    }.get(action, "Filtered")
+
+
+def _hybrid_stage1_retriever_name(retriever_name: Optional[str]) -> str:
+    if not retriever_name:
+        return ""
+    return retriever_name.replace("+structural_cypher", "")
+
+
+def _hybrid_targets_videos(
+    retriever_name: Optional[str],
+    question: str,
+    candidate_counts: Optional[Dict[str, int]] = None,
+) -> bool:
+    """True when hybrid Stage 2 should surface videos (not creators)."""
+    counts = candidate_counts or {}
+    video_ids = int(counts.get("video_ids") or 0)
+    account_ids = int(counts.get("youtube_channel_ids") or 0) + int(
+        counts.get("tiktok_usernames") or 0
+    )
+    if video_ids > 0 and account_ids == 0:
+        return True
+    if re.search(r"\bvideos?\b", question, re.IGNORECASE):
+        return True
+    if re.search(
+        r"\b(?:creators?|tiktokers?|youtubers?|influencers?)\b",
+        question,
+        re.IGNORECASE,
+    ):
+        return False
+    profile = get_retriever_profile(_hybrid_stage1_retriever_name(retriever_name))
+    return profile.get("output") == "videos"
+
+
+def _hybrid_entity_label(
+    retriever_name: Optional[str],
+    question: str,
+    candidate_counts: Optional[Dict[str, int]] = None,
+    *,
+    plural: bool = True,
+) -> str:
+    if _hybrid_targets_videos(retriever_name, question, candidate_counts):
+        return "videos" if plural else "video"
+    return "creators" if plural else "creator"
+
+
+def _structural_filter_label(question: str) -> str:
+    """Plain-language description of the structural part of a hybrid question."""
+    demo = _demographic_label(question)
+    geo = _match_geo_name(question)
+    platform = _explicit_platform_label(question)
+
+    if demo and geo:
+        label = f"{demo} living in {geo}"
+    elif geo:
+        label = f"people living in {geo}"
+    elif demo:
+        label = demo
+    else:
+        label = "people matching the location or demographic filter in your question"
+
+    if platform:
+        return f"{label} (via {platform} follows)"
+    return label
+
+
+def _candidate_pool_label(
+    candidate_counts: Dict[str, int],
+    *,
+    retriever_name: Optional[str] = None,
+    question: str = "",
+) -> str:
+    videos = int(candidate_counts.get("video_ids") or 0)
+    yt = int(candidate_counts.get("youtube_channel_ids") or 0)
+    tt = int(candidate_counts.get("tiktok_usernames") or 0)
+    if _hybrid_targets_videos(retriever_name, question, candidate_counts):
+        if videos:
+            return f"{videos} video{'s' if videos != 1 else ''}"
+        return "no semantically matched videos"
+    if yt and tt:
+        return f"{yt} YouTube channels and {tt} TikTok accounts"
+    if yt:
+        return f"{yt} YouTube channel{'s' if yt != 1 else ''}"
+    if tt:
+        return f"{tt} TikTok account{'s' if tt != 1 else ''}"
+    return "no semantically matched accounts"
+
+
+def _platforms_searched_label(
+    candidate_counts: Dict[str, int],
+    *,
+    platform: str = "all",
+) -> str:
+    yt = int(candidate_counts.get("youtube_channel_ids") or 0)
+    tt = int(candidate_counts.get("tiktok_usernames") or 0)
+    videos = int(candidate_counts.get("video_ids") or 0)
+    if videos and not yt and not tt:
+        normalized = (platform or "all").strip().lower()
+        if normalized == "youtube":
+            return "YouTube"
+        if normalized == "tiktok":
+            return "TikTok"
+        return "YouTube and TikTok"
+    if yt and tt:
+        return "YouTube and TikTok"
+    if yt:
+        return "YouTube"
+    if tt:
+        return "TikTok"
+    return "YouTube and TikTok"
+
+
+def build_hybrid_explanation(
+    *,
+    question: str,
+    theme: str,
+    candidate_counts: Dict[str, int],
+    min_score: Optional[float],
+    signal: str,
+    retriever_name: Optional[str] = None,
+    platform: str = "all",
+) -> str:
+    """User-facing paragraph explaining how the hybrid answer was produced."""
+    signal_label = SIGNAL_LABELS.get(signal, signal.replace("_", " "))
+    pool = _candidate_pool_label(
+        candidate_counts, retriever_name=retriever_name, question=question
+    )
+    platforms = _platforms_searched_label(candidate_counts, platform=platform)
+    structural = _structural_filter_label(question)
+    score_txt = f"{min_score:.2f}" if isinstance(min_score, (int, float)) else "0.70"
+    action = _hybrid_stage2_action(question)
+    video_output = _hybrid_targets_videos(retriever_name, question, candidate_counts)
+    entity = _hybrid_entity_label(
+        retriever_name, question, candidate_counts, plural=True
+    )
+    if video_output:
+        subject = f"videos whose {signal_label}"
+        if action == "counted":
+            tail = (
+                f"Then we counted how many of those videos are published by creators "
+                f"followed by {structural}."
+            )
+        elif action == "ranked":
+            tail = (
+                f"Then we ranked those videos by how many {structural} follow "
+                f"their creators on the graph."
+            )
+        else:
+            tail = (
+                f"Then we kept only videos whose creators are followed by "
+                f"{structural}."
+            )
+    else:
+        subject = f"creators whose {signal_label}"
+        if action == "counted":
+            tail = f"Then we counted how many of those {entity} are followed by {structural}."
+        elif action == "ranked":
+            tail = (
+                f"Then we ranked those {entity} by how many {structural} follow them "
+                f"on the graph."
+            )
+        else:
+            tail = (
+                f"Then we kept only those {entity} followed by {structural} "
+                f"(results below are sorted by semantic relevance from step 1)."
+            )
+    return (
+        f"We searched {platforms} for {subject} match "
+        f"\"{theme}\" (similarity ≥ {score_txt}) and found {pool}. {tail}"
+    )
 
 
 def build_hybrid_summary(
@@ -1112,64 +1687,111 @@ def build_hybrid_summary(
     stage2_rows: List[Dict[str, Any]],
     stage1_result_count: int,
     status: str,
+    min_score: Optional[float] = None,
+    signal: str = "topic",
+    retriever_name: Optional[str] = None,
 ) -> str:
-    """Research-style summary for hybrid_media (deterministic)."""
+    """User-facing summary for hybrid_media (deterministic)."""
     total_candidates = sum(candidate_counts.values()) if candidate_counts else 0
-    cand_parts = ", ".join(
-        f"{count} {kind.replace('_', ' ')}"
-        for kind, count in candidate_counts.items()
-        if count
-    ) or "no candidates"
+    structural = _structural_filter_label(question)
+    video_output = _hybrid_targets_videos(retriever_name, question, candidate_counts)
+    entity = _hybrid_entity_label(
+        retriever_name, question, candidate_counts, plural=True
+    )
+    entity_one = _hybrid_entity_label(
+        retriever_name, question, candidate_counts, plural=False
+    )
 
     if status == "soft_failure" or total_candidates == 0:
         return (
-            f"Could not apply a structural filter for '{theme}' because Stage 1 "
-            f"found insufficient semantic candidates ({cand_parts}). "
-            "Try broadening the theme or lowering MEDIA_RETRIEVER_MIN_SCORE."
+            f"Could not answer your question about '{theme}' — too few {entity} "
+            f"semantically matched the theme on YouTube/TikTok to apply the filter "
+            f"for {structural}. Try broadening the theme or lowering the similarity threshold."
         )
-
-    lines = [
-        f"Hybrid retrieval for theme '{theme}' combined semantic matching with a "
-        "structural filter from your question.",
-        "",
-        f"Stage 1 (semantic): {stage1_result_count} ranked candidates from vector "
-        f"search ({cand_parts} IDs collected for filtering).",
-    ]
 
     if not stage2_rows:
-        lines.append("")
-        lines.append(
-            "Stage 2 (structural): no items matched both the semantic theme and "
-            "the structural restriction in your question."
+        action = _hybrid_stage2_action(question)
+        if video_output:
+            if action == "ranked":
+                return (
+                    f"No videos in the semantic '{theme}' pool are from creators "
+                    f"followed by {structural} — so none could be ranked."
+                )
+            if action == "counted":
+                return (
+                    f"No videos both match '{theme}' (semantically) and are from "
+                    f"creators followed by {structural}."
+                )
+            return (
+                f"No videos in the semantic '{theme}' pool are from creators "
+                f"followed by {structural}."
+            )
+        if action == "ranked":
+            return (
+                f"No creators in the semantic '{theme}' pool are followed by "
+                f"{structural} — so none could be ranked for popularity."
+            )
+        if action == "counted":
+            return (
+                f"No creators both discuss '{theme}' (semantically) and are followed by "
+                f"{structural}."
+            )
+        return (
+            f"No creators in the semantic '{theme}' pool are followed by {structural}."
         )
-        return "\n".join(lines)
 
     if len(stage2_rows) == 1:
         row = stage2_rows[0]
         for key in ("creator_count", "video_count", "count"):
             if key in row and isinstance(row[key], (int, float)):
-                lines.append("")
-                lines.append(
-                    f"Stage 2 (structural): {int(row[key])} items matched both the "
-                    f"semantic theme and the structural filter."
+                count_value = int(row[key])
+                names = [
+                    str(n).strip()
+                    for n in (
+                        row.get("video_titles")
+                        if video_output and key == "video_count"
+                        else row.get("creator_names")
+                    )
+                    or []
+                    if n and str(n).strip()
+                ]
+                if count_value == 1 and names:
+                    return (
+                        f"1 {entity_one} matches '{theme}' and the structural filter "
+                        f"({structural}): {names[0]}."
+                    )
+                if names and len(names) <= 10:
+                    return (
+                        f"{count_value} {entity} match '{theme}' and {structural}: "
+                        f"{', '.join(names)}."
+                    )
+                if count_value == 1:
+                    return (
+                        f"1 {entity_one} matches '{theme}' and {structural}."
+                    )
+                return (
+                    f"{count_value} {entity} match '{theme}' and {structural}."
                 )
-                return "\n".join(lines)
 
-    lines.append("")
-    lines.append(
-        f"Stage 2 (structural): {len(stage2_rows)} rows matched after applying the "
-        "graph filter over Stage 1 candidates."
-    )
-    lines.append("")
-    lines.append("Top matches:")
+    if video_output:
+        heading = (
+            f"{len(stage2_rows)} videos match '{theme}' and are from creators "
+            f"followed by {structural}:"
+        )
+    else:
+        heading = (
+            f"{len(stage2_rows)} creators match '{theme}' and are followed by "
+            f"{structural}:"
+        )
+    lines = [heading]
     for row in stage2_rows[:SUMMARY_EXAMPLE_LIMIT]:
         if not isinstance(row, dict):
             continue
         label = (
-            row.get("creator")
-            or row.get("influencer_name")
-            or row.get("title")
+            row.get("title")
             or row.get("video_title")
+            or row.get("influencer_name")
+            or row.get("creator")
         )
         if label:
             lines.append(f"• {label}")
@@ -1201,60 +1823,86 @@ def build_hybrid_trace(
         or os.environ.get("OPENAI_EMBEDDING_MODEL")
         or "text-embedding-3-large"
     )
-    cand_summary = ", ".join(
-        f"{count} {kind.replace('_', ' ')}"
-        for kind, count in (candidate_counts or {}).items()
-        if count
-    ) or "none"
+    stage1_retriever = stage1.get("retriever_name") or retriever_name
+    platform = (
+        inputs.get("platform")
+        or (stage1.get("inputs") or {}).get("platform")
+        or "all"
+    )
+    pool = _candidate_pool_label(
+        candidate_counts, retriever_name=stage1_retriever, question=question
+    )
+    platforms = _platforms_searched_label(candidate_counts, platform=platform)
+    structural = _structural_filter_label(question)
+    score_txt = (
+        f"{float(min_score):.2f}"
+        if isinstance(min_score, (int, float))
+        else "0.70"
+    )
+    video_output = _hybrid_targets_videos(
+        stage1_retriever, question, candidate_counts
+    )
+    entity = _hybrid_entity_label(
+        stage1_retriever, question, candidate_counts, plural=True
+    )
+    hybrid_explanation = build_hybrid_explanation(
+        question=question,
+        theme=theme,
+        candidate_counts=candidate_counts,
+        min_score=min_score if isinstance(min_score, (int, float)) else None,
+        signal=signal,
+        retriever_name=stage1_retriever,
+        platform=platform,
+    )
+    stage2_action = _hybrid_stage2_action(question)
+    stage2_verb = _hybrid_stage2_action_label(stage2_action)
+    if video_output:
+        stage2_detail = (
+            f"{stage2_verb} videos from that pool to those whose creators are "
+            f"followed among {structural}. "
+            "This uses follower ↔ influencer ↔ account ↔ video links in Neo4j — "
+            "no second keyword or vector search."
+        )
+        stage2_search_subject = f"videos whose {signal_label}"
+    else:
+        stage2_detail = (
+            f"{stage2_verb} {entity} from that pool to those followed among "
+            f"{structural}. "
+            "This uses follower ↔ influencer ↔ channel links in Neo4j — "
+            "no second keyword or vector search."
+        )
+        stage2_search_subject = f"creators whose {signal_label}"
 
     steps = [
         {
             "step": 1,
-            "title": "Query understanding",
+            "title": "Understand your question",
             "detail": (
-                f"Classified as hybrid_media (semantic theme + structural filter). "
-                f"Theme: '{theme}'. Question: "
-                f"\"{question[:120]}{'...' if len(question) > 120 else ''}\""
+                f"Topic to match: \"{theme}\". "
+                f"Structural filter: {structural}."
             ),
         },
         {
             "step": 2,
-            "title": "Stage 1 — Semantic retrieval",
+            "title": f"Semantic search ({platforms})",
             "detail": (
-                f"Embedded '{query_text}' with {embedding_model} and ran "
-                f"{stage1.get('retriever_name', retriever_name)} over {signal_label} "
-                f"(min_score={min_score})."
+                f"Searched {platforms} for {stage2_search_subject} that are "
+                f"semantically similar to \"{query_text}\" (threshold ≥ {score_txt}, "
+                f"model {embedding_model}). Found {pool} to consider."
             ),
         },
         {
             "step": 3,
-            "title": "Stage 1 — Candidate IDs",
+            "title": "Structural filter in the graph",
             "detail": (
-                f"Collected candidate keys for Stage 2: {cand_summary}."
+                stage2_detail
+                + (" Cypher ran successfully." if stage2_cypher else "")
             ),
         },
         {
             "step": 4,
-            "title": "Stage 2 — Structural Cypher",
-            "detail": (
-                "An LLM generated read-only Cypher to apply the structural filter "
-                "(geography, demographics, follower attributes) over those candidate IDs."
-                + (" Cypher was executed successfully." if stage2_cypher else "")
-            ),
-        },
-        {
-            "step": 5,
-            "title": "Stage 2 — Graph filter",
-            "detail": (
-                "Structural Cypher joined candidates to Persons/Areas/Municipalities "
-                "as required by the question. No vector search or CONTAINS matching "
-                "on topic text in this stage."
-            ),
-        },
-        {
-            "step": 6,
-            "title": "Final result",
-            "detail": f"Combined pipeline retriever: {retriever_name}.",
+            "title": "Your answer",
+            "detail": hybrid_explanation,
         },
     ]
 
@@ -1269,6 +1917,9 @@ def build_hybrid_trace(
             "signal": signal,
             "min_score": min_score,
             "candidate_counts": candidate_counts,
+            "platforms_searched": platforms,
+            "structural_filter": structural,
+            "hybrid_explanation": hybrid_explanation,
             "embedding_model": embedding_model,
             "deduped_by_influencer": stage1.get("deduped_by_influencer"),
             "stage2_cypher_generated": bool(stage2_cypher),
@@ -1296,6 +1947,7 @@ def present_hybrid_result(
 
     stage1_results = list(stage1.get("results") or stage1.get("results_preview") or [])
     stage1_retriever = stage1.get("retriever_name") or inputs.get("stage1_retriever") or ""
+    min_score = inputs.get("min_score") or (stage1.get("inputs") or {}).get("min_score")
     if stage1_results and _is_video_result(stage1_results):
         stage1_results = enrich_video_results(
             stage1_results,
@@ -1313,14 +1965,37 @@ def present_hybrid_result(
         )
         stage1 = {**stage1, "results": stage1_results}
 
+    stage2_results = list(result.results or [])
+    if stage2_results:
+        stage2_results = enrich_hybrid_stage2_results(
+            stage2_results,
+            stage1_results=stage1_results,
+            signal=signal,
+            theme=str(theme),
+            retriever_name=stage1_retriever or result.retriever_name,
+            per_platform=stage1.get("per_platform"),
+            min_score=min_score if isinstance(min_score, (int, float)) else None,
+        )
+
     summary = build_hybrid_summary(
         question=question,
         theme=str(theme),
         candidate_counts=result.candidate_counts or {},
-        stage2_rows=result.results or [],
+        stage2_rows=stage2_results,
         stage1_result_count=len(stage1_results),
         status=result.status,
+        min_score=min_score if isinstance(min_score, (int, float)) else None,
+        signal=signal,
+        retriever_name=stage1_retriever or result.retriever_name,
     )
+    hybrid_audit = build_hybrid_audit(
+        candidate_keys=stage1.get("candidate_keys"),
+        candidate_counts=result.candidate_counts,
+        stage2_cypher=result.stage2_cypher,
+        stage2_params=result.stage2_params,
+        stage1_retriever=stage1_retriever or result.retriever_name,
+    )
+
     trace = build_hybrid_trace(
         question=question,
         theme=str(theme),
@@ -1330,6 +2005,9 @@ def present_hybrid_result(
         retriever_name=result.retriever_name,
         inputs=inputs,
     )
+    if isinstance(trace.get("params"), dict):
+        trace["params"]["stage2_cypher"] = result.stage2_cypher
+        trace["params"]["hybrid_audit"] = hybrid_audit
 
     return HybridMediaResult(
         retriever_name=result.retriever_name,
@@ -1337,12 +2015,14 @@ def present_hybrid_result(
         inputs=inputs,
         stage1=stage1,
         stage2_cypher=result.stage2_cypher,
+        stage2_params=result.stage2_params,
         candidate_counts=result.candidate_counts,
-        results=result.results,
+        results=stage2_results,
         summary=summary,
         status=result.status,
         error=result.error,
         timings=result.timings,
         retrieval_trace=trace,
         research_notes=list(HYBRID_RESEARCH_NOTES),
+        hybrid_audit=hybrid_audit,
     )

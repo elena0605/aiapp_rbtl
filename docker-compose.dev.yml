@@ -17,7 +17,15 @@ services:
       # Set to true to force schema refresh from Neo4j on first query
       # Remove or set to false after first update
       - UPDATE_NEO4J_SCHEMA=${UPDATE_NEO4J_SCHEMA:-false}
-    command: uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
+    # timeout-graceful-shutdown: don't block reload forever on in-flight /api/chat (hybrid ~60s)
+    # reload-delay: debounce rapid saves so one edit → one reload
+    command: >
+      uvicorn backend.app.main:app
+      --reload
+      --host 0.0.0.0
+      --port 8000
+      --timeout-graceful-shutdown 3
+      --reload-delay 1.5
 
   frontend:
     volumes:

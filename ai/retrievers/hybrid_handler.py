@@ -54,6 +54,7 @@ from ai.schema.schema_utils import load_cached_schema  # type: ignore
 from ai.terminology.loader import load as load_terminology  # type: ignore
 from ai.terminology.loader import as_text as terminology_as_text  # type: ignore
 
+from .base import run_neo4j_query
 from .media_retrieval_agent import (
     MediaRetrievalAgent,
     MediaRetrievalAgentError,
@@ -71,6 +72,80 @@ MAX_CORRECTION_RETRIES = 2
 
 def _escape_cypher_literal(value: str) -> str:
     return value.replace("\\", "\\\\").replace("'", "\\'")
+
+
+_INFLUENCER_CYPHER_VAR = "influencer"
+
+
+def _normalize_stage2_cypher(cypher: str) -> str:
+    """Fix common Stage 2 LLM Cypher issues before validate/execute."""
+    normalized = cypher.strip().rstrip(";")
+    # Neo4j parses bare `inf` as the infinity constant in expressions, so
+    # `RETURN inf.name` fails even when MATCH bound (inf:Influencer). Rename first.
+    normalized = re.sub(r"\binf\b", _INFLUENCER_CYPHER_VAR, normalized)
+    # Comma-chained patterns → separate MATCH lines (avoids planner/type errors).
+    normalized = re.sub(
+        r"\)\s*,\s*\((\w*:)",
+        r")\nMATCH (\1",
+        normalized,
+    )
+    # influencer.name is not always a string in the graph; toString keeps EXPLAIN happy.
+    normalized = re.sub(
+        rf"collect\s*\(\s*DISTINCT\s+{_INFLUENCER_CYPHER_VAR}\.name\s*\)",
+        f"collect(DISTINCT toString({_INFLUENCER_CYPHER_VAR}.name))",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    normalized = re.sub(
+        rf"(?<!toString\()\b{_INFLUENCER_CYPHER_VAR}\.name\b",
+        f"toString({_INFLUENCER_CYPHER_VAR}.name)",
+        normalized,
+    )
+    normalized = _rewrite_municipality_geo_filter(normalized)
+    # Hybrid Stage 2 should return every graph match; do not cap with LIMIT.
+    normalized = re.sub(
+        r"\n\s*LIMIT\s+\d+\s*$",
+        "",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    normalized = re.sub(
+        r"\n\s*SKIP\s+\d+\s*\n\s*LIMIT\s+\d+\s*$",
+        "",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    return normalized
+
+
+def _municipality_person_geo_prefix(municipality_name: str) -> str:
+    """Match residents by direct municipality link OR via Area -[:BELONGS_TO]-> Municipality."""
+    escaped = _escape_cypher_literal(municipality_name)
+    return (
+        "MATCH (p:Person)\n"
+        "WHERE EXISTS {\n"
+        f"  MATCH (p)-[:LIVES_IN_MUNICIPALITY]->(:Municipality "
+        f"{{municipality_name: '{escaped}'}})\n"
+        "} OR EXISTS {\n"
+        f"  MATCH (p)-[:LIVES_IN_AREA]->(:Area)-[:BELONGS_TO]->(:Municipality "
+        f"{{municipality_name: '{escaped}'}})\n"
+        "}\n"
+    )
+
+
+def _rewrite_municipality_geo_filter(cypher: str) -> str:
+    """Expand municipality-only Person MATCH to include area→BELONGS_TO paths."""
+    pattern = re.compile(
+        r"MATCH\s+\(p:Person\)-\[:LIVES_IN_MUNICIPALITY\]->\(:Municipality\s*"
+        r"\{municipality_name:\s*'((?:\\'|[^'])*)'\}\)\s*\n",
+        re.IGNORECASE,
+    )
+
+    def _repl(match: re.Match[str]) -> str:
+        raw = match.group(1).replace("\\'", "'")
+        return _municipality_person_geo_prefix(raw)
+
+    return pattern.sub(_repl, cypher, count=1)
 
 
 def _extract_geo_from_question(question: str) -> tuple[Optional[str], Optional[str]]:
@@ -119,18 +194,14 @@ def _build_template_structural_cypher(
     output_kind: str,
     candidate_counts: Dict[str, int],
 ) -> Optional[str]:
-    """Deterministic fallback for common geo + creator hybrid queries."""
+    """Deterministic fallback for common geo + creator/video hybrid queries."""
     area_name, municipality_name = _extract_geo_from_question(question)
     if not area_name and not municipality_name:
         return None
 
     has_yt = candidate_counts.get("youtube_channel_ids", 0) > 0
     has_tt = candidate_counts.get("tiktok_usernames", 0) > 0
-    if not (has_yt or has_tt):
-        return None
-
-    if output_kind not in {"count_creators", "creators"}:
-        return None
+    has_videos = candidate_counts.get("video_ids", 0) > 0
 
     if area_name:
         geo_match = (
@@ -138,33 +209,89 @@ def _build_template_structural_cypher(
             f"(:Area {{area_name: '{_escape_cypher_literal(area_name)}'}})\n"
         )
     else:
-        geo_match = (
-            "MATCH (p:Person)-[:LIVES_IN_MUNICIPALITY]->"
-            f"(:Municipality {{municipality_name: "
-            f"'{_escape_cypher_literal(municipality_name or '')}'}})\n"
-        )
+        geo_match = _municipality_person_geo_prefix(municipality_name or "")
 
-    account_filter = _account_id_filter(has_yt, has_tt)
     wants_count = (
-        output_kind == "count_creators"
+        output_kind in {"count_creators", "count_videos"}
         or re.search(r"\bhow many\b", question, re.IGNORECASE) is not None
     )
+
+    if output_kind in {"count_videos", "videos"}:
+        if not has_videos:
+            return None
+        video_path = (
+            f"MATCH (p)-[:FOLLOWS]->({_INFLUENCER_CYPHER_VAR}:Influencer)"
+            "-[:HAS_ACCOUNT]->(acc)"
+            "-[:HAS_VIDEO]->(v)\n"
+            "WHERE v.video_id IN $video_ids\n"
+        )
+        if wants_count:
+            return (
+                geo_match
+                + video_path
+                + "RETURN count(DISTINCT v) AS video_count, "
+                + "[n IN collect(DISTINCT coalesce(v.video_title, v.video_id)) "
+                + "WHERE n IS NOT NULL AND trim(toString(n)) <> '' | toString(n)] "
+                + "AS video_titles"
+            )
+        return (
+            geo_match
+            + video_path
+            + "RETURN DISTINCT\n"
+            + "  v.video_id AS video_id,\n"
+            + "  v.video_title AS title,\n"
+            + "  v.video_title AS video_title,\n"
+            + "  v.video_url AS url,\n"
+            + "  v.video_url AS video_url,\n"
+            + "  CASE\n"
+            + "    WHEN acc:YouTubeChannel THEN acc.channel_id\n"
+            + "    WHEN acc:TikTokUser THEN acc.username\n"
+            + "    ELSE NULL\n"
+            + "  END AS creator_id,\n"
+            + "  CASE\n"
+            + "    WHEN acc:YouTubeChannel THEN acc.title\n"
+            + "    WHEN acc:TikTokUser THEN acc.username\n"
+            + "    ELSE NULL\n"
+            + "  END AS creator,\n"
+            + "  CASE\n"
+            + "    WHEN acc:YouTubeChannel THEN acc.title\n"
+            + "    WHEN acc:TikTokUser THEN acc.username\n"
+            + "    ELSE NULL\n"
+            + "  END AS creator_name,\n"
+            + "  CASE\n"
+            + "    WHEN acc:YouTubeChannel THEN 'youtube'\n"
+            + "    WHEN acc:TikTokUser THEN 'tiktok'\n"
+            + "    ELSE NULL\n"
+            + "  END AS platform"
+        )
+
+    if output_kind not in {"count_creators", "creators"}:
+        return None
+    if not (has_yt or has_tt):
+        return None
+
+    account_filter = _account_id_filter(has_yt, has_tt)
     if wants_count:
         return (
             geo_match
-            + "MATCH (p)-[:FOLLOWS]->(inf:Influencer)-[:HAS_ACCOUNT]->(acc)\n"
+            + f"MATCH (p)-[:FOLLOWS]->({_INFLUENCER_CYPHER_VAR}:Influencer)"
+            "-[:HAS_ACCOUNT]->(acc)\n"
             + f"WHERE {account_filter}\n"
-            + "RETURN count(DISTINCT inf) AS creator_count"
+            + f"RETURN count(DISTINCT {_INFLUENCER_CYPHER_VAR}) AS creator_count, "
+            + f"[n IN collect(DISTINCT toString({_INFLUENCER_CYPHER_VAR}.name)) "
+            + "WHERE n IS NOT NULL AND trim(n) <> '' | n] AS creator_names"
         )
 
     return (
         geo_match
-        + "MATCH (p)-[:FOLLOWS]->(inf:Influencer)-[:HAS_ACCOUNT]->(acc)\n"
+        + f"MATCH (p)-[:FOLLOWS]->({_INFLUENCER_CYPHER_VAR}:Influencer)"
+        "-[:HAS_ACCOUNT]->(acc)\n"
         + f"WHERE {account_filter}\n"
-        + "RETURN DISTINCT inf.name AS influencer_name, "
-        + "labels(acc)[0] AS platform, "
-        + "coalesce(acc.channel_id, acc.username) AS account_id\n"
-        + "LIMIT 20"
+        + f"RETURN DISTINCT toString({_INFLUENCER_CYPHER_VAR}.name) AS creator_name, "
+        + "acc.channel_id AS channel_id, "
+        + "acc.username AS tiktok_username, "
+        + "CASE WHEN acc:YouTubeChannel THEN 'youtube' "
+        + "WHEN acc:TikTokUser THEN 'tiktok' ELSE 'unknown' END AS platform"
     )
 
 
@@ -185,6 +312,8 @@ class HybridMediaResult:
     timings: Dict[str, float] = field(default_factory=dict)
     retrieval_trace: Dict[str, Any] = field(default_factory=dict)
     research_notes: List[str] = field(default_factory=list)
+    stage2_params: Optional[Dict[str, Any]] = None
+    hybrid_audit: Optional[Dict[str, Any]] = None
 
 
 class _LocalPrompt:
@@ -251,21 +380,24 @@ class HybridMediaHandler:
             self._agent = MediaRetrievalAgent()
         return self._agent
 
-    def _get_prompt(self):
+    def _get_prompt(self) -> _LocalPrompt:
         if self._prompt is not None:
             return self._prompt
         prompt_label = os.environ.get("PROMPT_LABEL")
         try:
-            self._prompt = get_prompt_from_langfuse(
+            fetched = get_prompt_from_langfuse(
                 "graph.structural_filter_cypher",
                 langfuse_client=None,
                 label=prompt_label,
             )
+            if fetched is not None:
+                self._prompt = fetched
         except Exception as err:
             logger.warning(
                 "Langfuse prompt fetch for structural_filter_cypher failed (%s); using local YAML",
                 err,
             )
+        if self._prompt is None:
             self._prompt = _load_local_prompt("graph.structural_filter_cypher")
         return self._prompt
 
@@ -296,7 +428,6 @@ class HybridMediaHandler:
                     results=[],
                     summary="Empty question.",
                     status="empty",
-                    error="Empty question.",
                 ),
                 question=question,
             )
@@ -325,12 +456,17 @@ class HybridMediaHandler:
                         "and the structural filter (e.g. 'in Rotterdam Centrum') separately."
                     ),
                     status="empty",
-                    error=str(exc),
                     timings=timings,
                 ),
                 question,
             )
         timings["stage1"] = round(time.perf_counter() - stage1_start, 3)
+
+        # Stage 1 is internal only — collect every ID above min_score for Stage 2.
+        stage1 = await agent.refresh_hybrid_candidate_keys(stage1)
+        timings["stage1_candidate_refresh"] = round(
+            time.perf_counter() - stage1_start, 3
+        )
 
         candidate_counts = self._candidate_counts(stage1.candidate_keys)
         total_candidates = sum(candidate_counts.values())
@@ -410,6 +546,12 @@ class HybridMediaHandler:
             f"{count} {kind}" for kind, count in candidate_counts.items() if count
         ) or "no candidates"
         stage2_params = self._candidate_params(stage1.candidate_keys)
+        logger.info(
+            "Stage 2 params: youtube_channel_ids=%d tiktok_usernames=%d video_ids=%d",
+            len(stage2_params.get("youtube_channel_ids") or []),
+            len(stage2_params.get("tiktok_usernames") or []),
+            len(stage2_params.get("video_ids") or []),
+        )
 
         # Loop with correction retries.
         loop = asyncio.get_event_loop()
@@ -471,7 +613,7 @@ class HybridMediaHandler:
                 lines_ = cypher.split("\n")
                 if len(lines_) >= 2:
                     cypher = "\n".join(lines_[1:-1] if lines_[-1].startswith("```") else lines_[1:])
-            cypher = cypher.strip()
+            cypher = _normalize_stage2_cypher(cypher)
             if not cypher:
                 # LLM signalled "no structural filter needed" — fall back.
                 logger.info(
@@ -527,11 +669,15 @@ class HybridMediaHandler:
                     inputs={**stage1.inputs, "candidate_counts": candidate_counts},
                     stage1=self._stage1_to_dict(stage1),
                     stage2_cypher=cypher,
+                    stage2_params=stage2_params,
                     candidate_counts=candidate_counts,
                     results=[],
-                    summary="Structural Cypher could not be validated after retries.",
+                    summary=(
+                        "We found creators discussing that topic, but couldn't "
+                        "apply the location or audience filter you asked for. "
+                        "Try rephrasing the area or demographic."
+                    ),
                     status="empty",
-                    error=last_error,
                     timings=timings,
                 )
 
@@ -539,7 +685,10 @@ class HybridMediaHandler:
             exec_start = time.perf_counter()
             try:
                 with get_session() as session:
-                    rows = [dict(r) for r in session.run(cypher, **stage2_params)]
+                    rows = [
+                        dict(r)
+                        for r in run_neo4j_query(session, cypher, **stage2_params)
+                    ]
             except Exception as exc:
                 logger.warning("Stage 2 execution failed: %s", exc)
                 last_error = f"execution: {exc}"
@@ -561,16 +710,37 @@ class HybridMediaHandler:
                     inputs={**stage1.inputs, "candidate_counts": candidate_counts},
                     stage1=self._stage1_to_dict(stage1),
                     stage2_cypher=cypher,
+                    stage2_params=stage2_params,
                     candidate_counts=candidate_counts,
                     results=[],
-                    summary="Structural Cypher failed to execute after retries.",
+                    summary=(
+                        "We found creators discussing that topic, but couldn't "
+                        "apply the location or audience filter you asked for. "
+                        "Try rephrasing the area or demographic."
+                    ),
                     status="empty",
-                    error=last_error,
                     timings=timings,
                 )
             timings[f"stage2_exec_attempt_{attempt}"] = round(
                 time.perf_counter() - exec_start, 3
             )
+
+            rows = self._enrich_creator_count_rows(cypher, rows, stage2_params)
+            if not rows:
+                template_result = self._try_template_stage2(
+                    stage1=stage1,
+                    question=question,
+                    output_kind=output_kind,
+                    candidate_counts=candidate_counts,
+                    timings=timings,
+                )
+                if template_result is not None and template_result.results:
+                    logger.info(
+                        "Stage 2 LLM Cypher returned 0 rows; "
+                        "using template structural fallback (%d rows)",
+                        len(template_result.results),
+                    )
+                    return template_result
 
             summary = self._summarize_stage2(stage1, rows, candidate_counts)
             return HybridMediaResult(
@@ -583,6 +753,7 @@ class HybridMediaHandler:
                 },
                 stage1=self._stage1_to_dict(stage1),
                 stage2_cypher=cypher,
+                stage2_params=stage2_params,
                 candidate_counts=candidate_counts,
                 results=rows,
                 summary=summary,
@@ -606,11 +777,15 @@ class HybridMediaHandler:
             inputs={**stage1.inputs, "candidate_counts": candidate_counts},
             stage1=self._stage1_to_dict(stage1),
             stage2_cypher=last_cypher,
+            stage2_params=stage2_params,
             candidate_counts=candidate_counts,
             results=[],
-            summary="Hybrid retrieval exhausted retries without producing valid Cypher.",
+            summary=(
+                "We found creators discussing that topic, but couldn't "
+                "apply the location or audience filter you asked for. "
+                "Try rephrasing the area or demographic."
+            ),
             status="empty",
-            error=last_error,
             timings=timings,
         )
 
@@ -650,12 +825,16 @@ class HybridMediaHandler:
         exec_start = time.perf_counter()
         try:
             with get_session() as session:
-                rows = [dict(r) for r in session.run(cypher, **stage2_params)]
+                rows = [
+                    dict(r)
+                    for r in run_neo4j_query(session, cypher, **stage2_params)
+                ]
         except Exception as exc:
             logger.warning("Template Stage 2 execution failed: %s", exc)
             return None
         timings["stage2_template_exec"] = round(time.perf_counter() - exec_start, 3)
 
+        rows = self._enrich_creator_count_rows(cypher, rows, stage2_params)
         summary = self._summarize_stage2(stage1, rows, candidate_counts)
         return HybridMediaResult(
             retriever_name=f"{stage1.retriever_name}+structural_cypher",
@@ -668,6 +847,7 @@ class HybridMediaHandler:
             },
             stage1=self._stage1_to_dict(stage1),
             stage2_cypher=cypher,
+            stage2_params=stage2_params,
             candidate_counts=candidate_counts,
             results=rows,
             summary=summary,
@@ -700,6 +880,48 @@ class HybridMediaHandler:
     # ── Helpers ─────────────────────────────────────────────────────────────
 
     @staticmethod
+    def _enrich_creator_count_rows(
+        cypher: str,
+        rows: List[Dict[str, Any]],
+        stage2_params: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        """Re-run count Cypher with creator_names when the LLM omitted them."""
+        if not rows or len(rows) != 1 or "creator_count" not in rows[0]:
+            return rows
+        existing = [
+            str(n).strip()
+            for n in (rows[0].get("creator_names") or [])
+            if n and str(n).strip()
+        ]
+        if existing:
+            return [{**rows[0], "creator_names": existing}]
+
+        base = cypher.strip().rstrip(";")
+        if "creator_names" in base.lower():
+            return rows
+        names_return = (
+            f"[n IN collect(DISTINCT toString({_INFLUENCER_CYPHER_VAR}.name)) "
+            "WHERE n IS NOT NULL AND trim(n) <> '' | n] AS creator_names"
+        )
+        enriched = re.sub(
+            rf"RETURN\s+count\s*\(\s*DISTINCT\s+{_INFLUENCER_CYPHER_VAR}\s*\)\s+AS\s+creator_count\s*",
+            f"RETURN count(DISTINCT {_INFLUENCER_CYPHER_VAR}) AS creator_count, {names_return} ",
+            base,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        if enriched == base:
+            return rows
+        try:
+            with get_session() as session:
+                record = run_neo4j_query(session, enriched, **stage2_params).single()
+            if record:
+                return [dict(record)]
+        except Exception as exc:
+            logger.warning("Could not enrich hybrid creator names: %s", exc)
+        return rows
+
+    @staticmethod
     def _candidate_counts(candidate_keys: Dict[str, List[Any]]) -> Dict[str, int]:
         counts: Dict[str, int] = {}
         for key, values in (candidate_keys or {}).items():
@@ -725,6 +947,7 @@ class HybridMediaHandler:
             "status": stage1.status,
             "summary": stage1.summary,
             "deduped_by_influencer": stage1.deduped_by_influencer,
+            "per_platform": stage1.per_platform,
             "retrieval_trace": stage1.retrieval_trace,
             "research_notes": stage1.research_notes,
         }
@@ -751,9 +974,28 @@ class HybridMediaHandler:
                 (rows[0][k] for k in ("creator_count", "video_count", "count") if k in rows[0]),
                 None,
             )
+            is_video_count = "video_count" in rows[0]
+            name_key = "video_titles" if is_video_count else "creator_names"
+            entity = "video" if is_video_count else "creator"
+            entities = "videos" if is_video_count else "creators"
+            names = [
+                str(n).strip()
+                for n in (rows[0].get(name_key) or [])
+                if n and str(n).strip()
+            ]
+            if count_value == 1 and names:
+                return (
+                    f"1 {entity} matched your question about '{theme}': {names[0]}."
+                )
+            if names and len(names) <= 10:
+                joined = ", ".join(names)
+                return (
+                    f"{count_value} {entities} matched your question about '{theme}': "
+                    f"{joined}."
+                )
             return (
-                f"{count_value} items matched the semantic theme '{theme}' "
-                f"and the structural filter from your question."
+                f"{count_value} {entities} matched your question about '{theme}' "
+                f"with the structural filter you asked for."
             )
         return (
             f"{len(rows)} items matched theme '{theme}' and the structural filter "

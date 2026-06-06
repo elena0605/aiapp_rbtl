@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { Message } from './ChatInterface'
 import CypherViewer from './CypherViewer'
+import CollapsibleSection from './CollapsibleSection'
 import ResultsTable from './ResultsTable'
 import MediaRetrievalView from './MediaRetrievalView'
 import VisualizationRenderer from './VisualizationRenderer'
@@ -265,7 +266,9 @@ export default function MessageList({
             
             {message.cypher && (
               <div className="mt-3 max-w-full overflow-x-auto">
-                <CypherViewer cypher={message.cypher} />
+                <CollapsibleSection title="Cypher" defaultOpen={false}>
+                  <CypherViewer cypher={message.cypher} showLabel={false} />
+                </CollapsibleSection>
               </div>
             )}
             
@@ -284,21 +287,22 @@ export default function MessageList({
             
             {message.timings && message.role === 'assistant' && Object.keys(message.timings).length > 0 && (
               <div className="mt-3 text-xs">
-                <div className="font-semibold mb-1">Query timings:</div>
-                <ul className="space-y-1">
-                  {Object.entries(message.timings)
-                    .filter(([key]) => !['correction_attempts', 'retry_count'].includes(key))
-                    .map(([key, value]) => (
-                    <li key={key} className="flex justify-between items-center">
-                      <span className="text-gray-600">
-                        {key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}:
-                      </span>
-                      <span className="font-mono text-gray-800 ml-2">
-                        {typeof value === 'number' ? `${value.toFixed(2)}s` : value}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
+                <CollapsibleSection title="Query timings" defaultOpen={false}>
+                  <ul className="space-y-1">
+                    {Object.entries(message.timings)
+                      .filter(([key]) => !['correction_attempts', 'retry_count'].includes(key))
+                      .map(([key, value]) => (
+                      <li key={key} className="flex justify-between items-center">
+                        <span className="text-gray-600">
+                          {key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}:
+                        </span>
+                        <span className="font-mono text-gray-800 ml-2">
+                          {typeof value === 'number' ? `${value.toFixed(2)}s` : value}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </CollapsibleSection>
               </div>
             )}
             
@@ -337,15 +341,6 @@ export default function MessageList({
               <VisualizationRenderer visualization={message.visualization} />
             )}
             
-            {message.error && message.cypher && (
-              <div className="mt-3 p-3 bg-red-50 border border-red-100 rounded-xl text-red-700 text-sm">
-                <div className="font-semibold mb-1 text-xs uppercase tracking-wide text-red-500">Validation Details</div>
-                <div className="mt-1 font-mono text-xs bg-red-100/60 p-2.5 rounded-lg text-red-800">
-                  Generated Query: {message.cypher}
-                </div>
-              </div>
-            )}
-
             {message.role === 'assistant' && onSubmitFeedback && message.id && !message.error && (
               <FeedbackWidget message={message} onSubmitFeedback={onSubmitFeedback} />
             )}

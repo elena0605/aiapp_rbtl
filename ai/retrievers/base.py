@@ -27,13 +27,21 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, cast
+
+from typing_extensions import LiteralString
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from utils.neo4j import get_session  # type: ignore
+from utils.neo4j import get_session
+
+
+def run_neo4j_query(session: Any, query: str, **parameters: Any) -> Any:
+    """Execute Cypher when the query string is built or selected at runtime."""
+    return session.run(cast(LiteralString, query), **parameters)
+
 
 try:
     from dotenv import load_dotenv  # type: ignore
@@ -97,6 +105,8 @@ MEDIA_RETRIEVER_K_FLOOR = _env_int("MEDIA_RETRIEVER_K_FLOOR", 50)
 # Index-size cache TTL in seconds.
 MEDIA_RETRIEVER_INDEX_SIZE_TTL = _env_int("MEDIA_RETRIEVER_INDEX_SIZE_TTL", 3600)
 MEDIA_RETRIEVER_TOP_N = _env_int("MEDIA_RETRIEVER_TOP_N", 10)
+# Max rows returned in count-retriever sample lists (full count is still exact).
+MEDIA_RETRIEVER_COUNT_SAMPLE_LIMIT = _env_int("MEDIA_RETRIEVER_COUNT_SAMPLE_LIMIT", 50)
 MEDIA_RETRIEVER_USE_POSITION = _env_bool("MEDIA_RETRIEVER_USE_POSITION", False)
 MEDIA_RETRIEVER_ENABLE_UNIFIED = _env_bool("MEDIA_RETRIEVER_ENABLE_UNIFIED", False)
 MEDIA_RETRIEVER_AUTO_BROADEN = _env_bool("MEDIA_RETRIEVER_AUTO_BROADEN", False)
@@ -302,7 +312,7 @@ def list_expected_indexes() -> List[str]:
 def _read_index_size_from_db(index_name: str) -> int:
     cypher = _INDEX_COUNT_CYPHER[index_name]
     with get_session() as session:
-        rec = session.run(cypher).single()
+        rec = run_neo4j_query(session, cypher).single()
         return int(rec["c"]) if rec else 0
 
 

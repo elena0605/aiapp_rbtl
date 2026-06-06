@@ -5,7 +5,7 @@ import os
 import sys
 from functools import lru_cache, partial
 from pathlib import Path
-from typing import Dict, Any, List, Optional, AsyncIterator
+from typing import Dict, Any, List, Optional, AsyncIterator, Tuple
 import json
 import re
 import logging
@@ -20,7 +20,9 @@ if str(ROOT) not in sys.path:
 PROMPTS_DIR = ROOT / "ai" / "prompts"
 
 from utils.neo4j import get_session
+from ai.retrievers.base import run_neo4j_query
 from utils.cypher_validator import validate_cypher, CypherValidationError, ReadOnlyViolationError
+from utils.user_facing_errors import QUERY_FAILURE, assistant_content
 from ai.schema.schema_utils import get_cached_schema, fetch_schema_from_neo4j
 from ai.terminology.loader import load as load_terminology, as_text as terminology_as_text
 from ai.fewshots.vector_store import get_vector_store
@@ -142,11 +144,118 @@ _SUMMARY_SYSTEM_MSG = (
 )
 
 
+_SEMANTIC_THEME_SIGNALS = (
+    "talk about",
+    "talking about",
+    "discuss",
+    "discussing",
+    "discussion",
+    "audiences",
+    "comment section",
+    "comment sections",
+    "videos about",
+    "video about",
+    "content about",
+    "make content",
+    "semantically",
+    "commenters",
+)
+
+_STRUCTURAL_SIGNALS = (
+    "followed",
+    "follows",
+    "followers",
+    "live in",
+    "living in",
+    "lives in",
+    "persons",
+    "people",
+    "gender",
+    "school year",
+    "municipality",
+    "among ",
+    "aged ",
+    "how many persons",
+    "count persons",
+)
+
+
+def _is_pure_structural_question(question: str) -> bool:
+    """True when the question is graph-only (geo/demographics/follows) with no semantic theme."""
+    if not question or not question.strip():
+        return False
+    q_lower = question.lower()
+    if any(signal in q_lower for signal in _SEMANTIC_THEME_SIGNALS):
+        return False
+    if not any(signal in q_lower for signal in _STRUCTURAL_SIGNALS):
+        return False
+    try:
+        data = load_terminology("v1") or {}
+        geo = data.get("geography") or {}
+        names = list(geo.get("area_names") or []) + list(
+            geo.get("municipality_names") or []
+        )
+        if any(name.lower() in q_lower for name in names):
+            return True
+    except Exception:
+        pass
+    return any(
+        signal in q_lower
+        for signal in ("followed", "follows", "followers", "live in", "living in")
+    )
+
+
+def _llm_max_tokens(params: Dict[str, Any], *, default: int = 4096) -> int:
+    """Cap LLM output size — prompt config must not force 16k tokens on every call."""
+    try:
+        raw = int(params.get("max_tokens", default))
+    except (TypeError, ValueError):
+        raw = default
+    return min(max(raw, 256), 8192)
+
+
+def _prefer_fallback_summary(question: str, rows: list) -> bool:
+    """Skip the summary LLM for simple count / tiny result sets."""
+    if not rows:
+        return True
+    q_lower = (question or "").lower()
+    if len(rows) == 1:
+        row = rows[0]
+        if any(
+            key in row and isinstance(row[key], (int, float))
+            for key in (
+                "creator_count",
+                "count",
+                "follower_count",
+                "followers",
+                "total",
+                "person_count",
+            )
+        ):
+            return True
+    return "how many" in q_lower and len(rows) <= 5
+
+
 def _build_fallback_summary(question: str, rows: list) -> str:
     """Build a simple template summary when the LLM is unavailable or filtered."""
     n = len(rows) if rows else 0
     if n == 0:
         return "The query returned no results."
+
+    if n == 1 and isinstance(rows[0], dict):
+        row = rows[0]
+        for key, label in (
+            ("creator_count", "creators"),
+            ("follower_count", "followers"),
+            ("followers", "followers"),
+            ("person_count", "people"),
+            ("count", "results"),
+            ("total", "results"),
+        ):
+            if key in row and isinstance(row[key], (int, float)):
+                value = int(row[key])
+                unit = label[:-1] if value == 1 and label.endswith("s") else label
+                return f"The query found {value} {unit} for your question."
 
     cols = list(rows[0].keys()) if rows else []
     col_str = ", ".join(cols) if cols else "the data"
@@ -247,7 +356,7 @@ class GraphRAGService:
         self._schema_string = None
         self._terminology_str = None
         self._prompt = None
-        self._params = None
+        self._params: Dict[str, Any] = {}
         self._analytics_agent = None
         self._intent_router = None
         self._visualization_agent = None
@@ -402,7 +511,7 @@ class GraphRAGService:
             self._terminology_str = terminology_as_text(terminology_dict)
         return self._terminology_str
     
-    def _get_prompt(self):
+    def _get_prompt(self) -> Tuple[Any, Dict[str, Any]]:
         """Get Langfuse prompt."""
         if self._prompt is None:
             prompt_label = os.environ.get("PROMPT_LABEL")
@@ -423,11 +532,11 @@ class GraphRAGService:
                 self._prompt = _load_local_prompt("graph.text_to_cypher")
 
             self._params = getattr(self._prompt, "config", None) or {}
-        return self._prompt, self._params
+        return self._prompt, self._params or {}
     
     def _get_analytics_agent(self):
         """Get or create analytics agent (lazy initialization)."""
-        if not ANALYTICS_AVAILABLE:
+        if not ANALYTICS_AVAILABLE or GraphAnalyticsAgent is None:
             return None
         if self._analytics_agent is None:
             self._analytics_agent = GraphAnalyticsAgent(use_llm_selector=True)
@@ -439,7 +548,7 @@ class GraphRAGService:
         Disabled when ``MEDIA_RETRIEVER_ENABLED=false`` so we can ship the
         intent route safely and roll it out gradually in production.
         """
-        if not MEDIA_RETRIEVAL_AVAILABLE:
+        if not MEDIA_RETRIEVAL_AVAILABLE or MediaRetrievalAgent is None:
             return None
         enabled = os.environ.get("MEDIA_RETRIEVER_ENABLED", "true").lower() in {"1", "true", "yes"}
         if not enabled:
@@ -477,7 +586,7 @@ class GraphRAGService:
 
     def _get_intent_router(self):
         """Get or create intent router (lazy initialization)."""
-        if not INTENT_ROUTER_AVAILABLE:
+        if not INTENT_ROUTER_AVAILABLE or IntentRouter is None:
             return None
         if self._intent_router is None:
             try:
@@ -489,7 +598,7 @@ class GraphRAGService:
 
     def _get_visualization_agent(self):
         """Get or create visualization agent (lazy initialization)."""
-        if not VISUALIZATION_AVAILABLE:
+        if not VISUALIZATION_AVAILABLE or VisualizationAgent is None:
             return None
         if self._visualization_agent is None:
             try:
@@ -615,7 +724,7 @@ class GraphRAGService:
         history = conversation_history or []
 
         # ── Guardrails (cheap, runs first) ───────────────────────────
-        if GUARDRAILS_AVAILABLE:
+        if GUARDRAILS_AVAILABLE and guardrails_module is not None:
             guard_result = guardrails_module.check(question)
             if not guard_result.passed:
                 logger.info(
@@ -653,6 +762,17 @@ class GraphRAGService:
                 )
 
                 effective_q = intent_result.effective_question
+
+                if _is_pure_structural_question(effective_q) and intent_result.intent in (
+                    "media_retrieval",
+                    "hybrid_media",
+                ):
+                    logger.info(
+                        "GraphRAG: overriding intent %s -> graph_query "
+                        "(pure structural question, no semantic theme)",
+                        intent_result.intent,
+                    )
+                    intent_result.intent = "graph_query"
 
                 # ── Off-topic ────────────────────────────────────────
                 if intent_result.intent == "off_topic":
@@ -810,10 +930,13 @@ class GraphRAGService:
                 "error": None,
                 "timings": {},
             }
-        except GraphAnalyticsAgentError as e:
-            logger.info("GraphRAG: analytics agent found no tool: %s", e)
-            return None
         except Exception as e:
+            if (
+                GraphAnalyticsAgentError is not None
+                and isinstance(e, GraphAnalyticsAgentError)
+            ):
+                logger.info("GraphRAG: analytics agent found no tool: %s", e)
+                return None
             logger.warning("GraphRAG: analytics agent error: %s", e, exc_info=True)
             return None
 
@@ -863,10 +986,13 @@ class GraphRAGService:
                 "error": None,
                 "timings": {"media_retrieval": round(elapsed, 3)},
             }
-        except MediaRetrievalAgentError as e:
-            logger.info("GraphRAG: media retrieval agent could not match: %s", e)
-            return None
         except Exception as e:
+            if (
+                MediaRetrievalAgentError is not None
+                and isinstance(e, MediaRetrievalAgentError)
+            ):
+                logger.info("GraphRAG: media retrieval agent could not match: %s", e)
+                return None
             logger.warning(
                 "GraphRAG: media retrieval agent error: %s", e, exc_info=True
             )
@@ -911,6 +1037,7 @@ class GraphRAGService:
                 "candidate_counts": result.candidate_counts,
                 "retrieval_trace": result.retrieval_trace,
                 "research_notes": result.research_notes,
+                "hybrid_audit": result.hybrid_audit,
                 "deduped_by_influencer": (result.stage1 or {}).get(
                     "deduped_by_influencer", False
                 ),
@@ -1301,7 +1428,11 @@ class GraphRAGService:
         include_examples = os.environ.get("INCLUDE_FEWSHOT_EXAMPLES", "true").lower() in {"1", "true", "yes"}
         examples_str = ""
         examples_used = []
-        use_vector_search = include_examples and os.environ.get("USE_VECTOR_SEARCH", "").lower() in {"1", "true", "yes"}
+        use_vector_search = (
+            include_examples
+            and os.environ.get("USE_VECTOR_SEARCH", "").lower() in {"1", "true", "yes"}
+            and not _is_pure_structural_question(question)
+        )
         
         if not include_examples:
             logger.info("GraphRAG: few-shot examples disabled via INCLUDE_FEWSHOT_EXAMPLES")
@@ -1357,7 +1488,11 @@ class GraphRAGService:
 
         # Build conversation context for the Cypher prompt
         conversation_context = "(no prior conversation)"
-        if conversation_history and INTENT_ROUTER_AVAILABLE:
+        if (
+            conversation_history
+            and INTENT_ROUTER_AVAILABLE
+            and IntentRouter is not None
+        ):
             try:
                 conversation_context = IntentRouter.format_history_for_cypher(
                     conversation_history, max_pairs=3
@@ -1383,7 +1518,7 @@ class GraphRAGService:
             raise RuntimeError("OPENAI_MODEL not set in .env")
 
         temperature = float(params.get("temperature", 0.0))
-        max_tokens = max(int(params.get("max_tokens", 16000)), 16000)
+        max_tokens = _llm_max_tokens(params)
 
         result = {
             "question": question,
@@ -1483,7 +1618,7 @@ class GraphRAGService:
                         timings = {k: v for k, v in timings.items() if v}
                         result["timings"] = timings
                     else:
-                        result["error"] = last["error"]
+                        result["error"] = QUERY_FAILURE
                         result["cypher"] = last["cypher"]
                 break
 
@@ -1503,8 +1638,7 @@ class GraphRAGService:
                 logger.info("GraphRAG: Cypher query validation passed")
             except ReadOnlyViolationError as ve:
                 logger.error("GraphRAG: read-only violation: %s", ve)
-                result["error"] = f"Read-only violation: {ve}"
-                result["validation_details"] = ve.validation_details
+                result["error"] = QUERY_FAILURE
                 break
             except CypherValidationError as ve:
                 logger.error(
@@ -1526,8 +1660,7 @@ class GraphRAGService:
                     })
                     validation_failed = True
                 else:
-                    result["error"] = str(ve)
-                    result["validation_details"] = ve.validation_details
+                    result["error"] = QUERY_FAILURE
                     break
             except Exception as e:
                 logger.warning("GraphRAG: Cypher validation skipped: %s", e)
@@ -1543,7 +1676,7 @@ class GraphRAGService:
                 logger.info("GraphRAG: executing Cypher against Neo4j")
                 with get_session() as session:
                     query_start = time.perf_counter()
-                    query_result = session.run(cypher)
+                    query_result = run_neo4j_query(session, cypher)
                     rows = [record.data() for record in query_result]
                     rows = [_convert_neo4j_temporal_to_string(row) for row in rows]
                     timings["query_knowledge_base"] = time.perf_counter() - query_start
@@ -1560,7 +1693,7 @@ class GraphRAGService:
                         "feedback_type": "syntax_error",
                     })
                     continue
-                result["error"] = str(e)
+                result["error"] = QUERY_FAILURE
                 break
 
             # ── Empty results — retry if attempts remain ─────────────
@@ -1616,63 +1749,72 @@ class GraphRAGService:
                 result["results"] = rows
 
             if output_mode in {"chat", "both"} and not skip_summary:
-                try:
-                    summary_prompt = get_prompt_from_langfuse(
-                        "graph-result-summarizer",
-                        label=os.environ.get("PROMPT_LABEL"),
+                if _prefer_fallback_summary(question, rows):
+                    result["summary"] = _build_fallback_summary(question, rows)
+                    timings["generate_final_response"] = 0.0
+                    logger.info(
+                        "GraphRAG: using template summary for simple count/small result"
                     )
-                except Exception as err:
-                    print(
-                        f"Langfuse summary prompt fetch failed ({err}). "
-                        "Using local YAML fallback.",
-                        file=sys.stderr,
-                    )
-                    summary_prompt = _load_local_prompt("graph.result_summarizer")
-                summary_params = getattr(summary_prompt, "config", None) or {}
-                summary_temp = float(summary_params.get("temperature", 0.0))
-                summary_max_tokens = max(int(summary_params.get("max_tokens", 16000)), 16000)
-
-                preview = rows[:10] if isinstance(rows, list) else rows
-                summary_rendered = summary_prompt.compile(
-                    question=question,
-                    cypher=cypher,
-                    results=json.dumps(preview, ensure_ascii=False),
-                )
-
-                logger.info(
-                    "GraphRAG: invoking LLM for summary (model=%s, max_tokens=%s, prompt_len=%d chars)",
-                    model, summary_max_tokens, len(summary_rendered),
-                )
-                summary_start = time.perf_counter()
-                try:
-                    llm_summary = create_completion(
-                        summary_rendered,
-                        model=model,
-                        temperature=summary_temp,
-                        max_tokens=summary_max_tokens,
-                        langfuse_prompt=summary_prompt,
-                        system_message=_SUMMARY_SYSTEM_MSG,
-                    )
-                    if llm_summary and llm_summary.strip():
-                        result["summary"] = llm_summary
-                    else:
-                        logger.warning(
-                            "GraphRAG: summary LLM returned empty (content filter), "
-                            "using fallback summary"
+                else:
+                    try:
+                        summary_prompt = get_prompt_from_langfuse(
+                            "graph-result-summarizer",
+                            label=os.environ.get("PROMPT_LABEL"),
                         )
+                    except Exception as err:
+                        print(
+                            f"Langfuse summary prompt fetch failed ({err}). "
+                            "Using local YAML fallback.",
+                            file=sys.stderr,
+                        )
+                        summary_prompt = _load_local_prompt("graph.result_summarizer")
+                    summary_params = getattr(summary_prompt, "config", None) or {}
+                    summary_temp = float(summary_params.get("temperature", 0.0))
+                    summary_max_tokens = _llm_max_tokens(summary_params)
+
+                    preview = rows[:10] if isinstance(rows, list) else rows
+                    summary_rendered = summary_prompt.compile(
+                        question=question,
+                        cypher=cypher,
+                        results=json.dumps(preview, ensure_ascii=False),
+                    )
+
+                    logger.info(
+                        "GraphRAG: invoking LLM for summary (model=%s, max_tokens=%s, prompt_len=%d chars)",
+                        model, summary_max_tokens, len(summary_rendered),
+                    )
+                    summary_start = time.perf_counter()
+                    try:
+                        llm_summary = create_completion(
+                            summary_rendered,
+                            model=model,
+                            temperature=summary_temp,
+                            max_tokens=summary_max_tokens,
+                            langfuse_prompt=summary_prompt,
+                            system_message=_SUMMARY_SYSTEM_MSG,
+                        )
+                        if llm_summary and llm_summary.strip():
+                            result["summary"] = llm_summary
+                        else:
+                            logger.warning(
+                                "GraphRAG: summary LLM returned empty (content filter), "
+                                "using fallback summary"
+                            )
+                            result["summary"] = _build_fallback_summary(
+                                question, rows,
+                            )
+                    except Exception as e:
+                        logger.exception("GraphRAG: error generating summary: %s", e)
                         result["summary"] = _build_fallback_summary(
                             question, rows,
                         )
-                except Exception as e:
-                    logger.exception("GraphRAG: error generating summary: %s", e)
-                    result["summary"] = _build_fallback_summary(
-                        question, rows,
+                    timings["generate_final_response"] = (
+                        time.perf_counter() - summary_start
                     )
-                timings["generate_final_response"] = time.perf_counter() - summary_start
-                logger.info(
-                    "GraphRAG: summary LLM completed in %.2fs",
-                    time.perf_counter() - summary_start,
-                )
+                    logger.info(
+                        "GraphRAG: summary LLM completed in %.2fs",
+                        time.perf_counter() - summary_start,
+                    )
 
         logger.info(
             "GraphRAG: finished processing question in %.2fs (retries=%d)",
@@ -1737,9 +1879,12 @@ class GraphRAGService:
                 "data": result["summary"],
             }
 
-        if result.get("error"):
+        if result.get("error") and not result.get("summary"):
             yield {
-                "type": "error",
-                "data": result["error"],
+                "type": "summary",
+                "data": assistant_content(
+                    error=result.get("error"),
+                    route_type=result.get("route_type"),
+                ),
             }
 

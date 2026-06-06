@@ -94,6 +94,21 @@ def get_chat_sessions_collection() -> Collection:
     return db["chat_sessions"]
 
 
+def get_chat_message_payloads_collection() -> Collection:
+    """Get the chat_message_payloads collection (heavy fields per message_id)."""
+    db = get_database()
+    collection = db["chat_message_payloads"]
+    try:
+        collection.create_index(
+            [("username", 1), ("message_id", 1)],
+            unique=True,
+            name="username_message_id",
+        )
+    except Exception:
+        pass
+    return collection
+
+
 def get_feedback_collection() -> Collection:
     """Get the feedback collection for thumbs-up/down ratings and comments."""
     db = get_database()

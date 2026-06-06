@@ -74,6 +74,9 @@ template: |
        - creators / count_creators: one MATCH to Influencer -[:HAS_ACCOUNT]-> acc
          then WHERE (acc:YouTubeChannel AND acc.channel_id IN $youtube_channel_ids)
          OR (acc:TikTokUser AND acc.username IN $tiktok_usernames).
+         NEVER bind the Influencer node as variable `inf` — Neo4j treats bare
+         `inf` as the infinity constant, so `RETURN inf.name` fails validation.
+         Use `influencer` (or `i`) instead.
        - videos / count_videos: MATCH to video nodes with video_id IN $video_ids.
      Combine YouTube and TikTok with OR in WHERE when both lists are non-empty.
   3. APPLY THE STRUCTURAL FILTER from the user question — geography
@@ -86,11 +89,25 @@ template: |
      Canonical pattern for area + creator count (copy this shape; substitute
      the area/municipality name and keep the OR account filter):
        MATCH (p:Person)-[:LIVES_IN_AREA]->(:Area {area_name: 'Rotterdam Centrum'})
-       MATCH (p)-[:FOLLOWS]->(inf:Influencer)-[:HAS_ACCOUNT]->(acc)
+       MATCH (p)-[:FOLLOWS]->(influencer:Influencer)-[:HAS_ACCOUNT]->(acc)
        WHERE (acc:YouTubeChannel AND acc.channel_id IN $youtube_channel_ids)
           OR (acc:TikTokUser AND acc.username IN $tiktok_usernames)
-       RETURN count(DISTINCT inf) AS creator_count
-     For municipality filters use LIVES_IN_MUNICIPALITY and Municipality.municipality_name.
+       RETURN count(DISTINCT influencer) AS creator_count,
+              [n IN collect(DISTINCT toString(influencer.name))
+               WHERE n IS NOT NULL AND trim(n) <> '' | n] AS creator_names
+     Use separate MATCH lines (never comma-chain two graph patterns in one MATCH).
+     For municipality filters (e.g. 'Rotterdam'), residents are usually linked via
+     Area -[:BELONGS_TO]-> Municipality — NOT only LIVES_IN_MUNICIPALITY. Use:
+       MATCH (p:Person)
+       WHERE EXISTS {
+         MATCH (p)-[:LIVES_IN_MUNICIPALITY]->(:Municipality {municipality_name: 'Rotterdam'})
+       } OR EXISTS {
+         MATCH (p)-[:LIVES_IN_AREA]->(:Area)-[:BELONGS_TO]->(:Municipality {municipality_name: 'Rotterdam'})
+       }
+       MATCH (p)-[:FOLLOWS]->(influencer:Influencer)-[:HAS_ACCOUNT]->(acc)
+       WHERE (acc:YouTubeChannel AND acc.channel_id IN $youtube_channel_ids)
+          OR (acc:TikTokUser AND acc.username IN $tiktok_usernames)
+       RETURN count(DISTINCT influencer) AS creator_count, ...
      NEVER wrap YouTube/TikTok seeding in CALL { UNION } — Neo4j rejects it.
   5. DO NOT do semantic matching in Cypher. NEVER use:
        - WHERE topic.name CONTAINS '...'
@@ -101,13 +118,19 @@ template: |
      theme-matched set. Re-matching here would double-filter and lose precision.
   6. DO NOT touch Person.UserID — it is excluded from public outputs.
   7. RESPECT the output kind from the user question:
-       - "how many creators ..." → RETURN count(DISTINCT inf|c|u) AS creator_count
+       - "how many creators ..." → RETURN count(DISTINCT influencer) AS creator_count,
+         [n IN collect(DISTINCT toString(influencer.name))
+          WHERE n IS NOT NULL AND trim(n) <> '' | n] AS creator_names
        - "how many videos ..."   → RETURN count(DISTINCT v) AS video_count
-       - "which creators ..."    → RETURN creator info (name, channel_id/username, etc.) DISTINCT and LIMIT 20
-       - "show me videos ..."    → RETURN video info (id, title, creator, url) DISTINCT and LIMIT 20
-     Prefer DISTINCT over ORDER BY for hybrid; if a ranking is needed,
-     ORDER BY a structural property (follower_count, view_count, comment_count),
-     never by a semantic score.
+       - "which creators ..."    → RETURN creator info (name, channel_id/username, etc.) DISTINCT.
+         Do NOT add LIMIT or SKIP — return every graph match in the candidate pool.
+       - "show me videos ..."    → RETURN video info DISTINCT (no LIMIT).
+         Use these aliases: v.video_id AS video_id, v.video_title AS title,
+         v.video_url AS url, creator display name AS creator, and
+         'youtube'/'tiktok' AS platform (from acc label).
+     Do NOT add LIMIT, SKIP, or ORDER BY unless the user explicitly asks to rank
+     by a structural metric (e.g. "most followed"). Stage 1 already ranked
+     semantically; Stage 2 only filters by graph structure.
   8. PARAMETERIZED ONLY. Use the parameter names above; do not interpolate
      user values into the query string.
   9. Output ONLY the Cypher statement, no explanations or markdown fences.

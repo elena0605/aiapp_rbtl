@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import smtplib
 from datetime import datetime, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 from backend.app.services.mongodb import get_feedback_collection
 
 logger = logging.getLogger(__name__)
+
+# Keep SMTP bodies within practical limits; full rows are still stored in MongoDB feedback doc.
+MAX_EMAIL_RETRIEVAL_JSON_CHARS = 400_000
 
 
 def store_feedback(
@@ -25,6 +29,9 @@ def store_feedback(
     answer: Optional[str] = None,
     cypher: Optional[str] = None,
     route_type: Optional[str] = None,
+    retrieval_results: Optional[List[Dict[str, Any]]] = None,
+    per_platform: Optional[Dict[str, Any]] = None,
+    stage1: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Persist a feedback document in MongoDB and return its id."""
     collection = get_feedback_collection()
@@ -37,11 +44,55 @@ def store_feedback(
         "answer": answer,
         "cypher": cypher,
         "route_type": route_type,
+        "retrieval_results": retrieval_results,
+        "per_platform": per_platform,
+        "stage1": stage1,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
     result = collection.insert_one(doc)
     logger.info("Feedback stored: message_id=%s rating=%s", message_id, rating)
     return str(result.inserted_id)
+
+
+def _format_retrieval_results_for_email(
+    results: Optional[List[Dict[str, Any]]],
+    *,
+    per_platform: Optional[Dict[str, Any]] = None,
+    stage1: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Serialize full retrieval rows for the feedback email body."""
+    sections: List[str] = []
+    if results:
+        try:
+            body = json.dumps(results, indent=2, ensure_ascii=False, default=str)
+        except (TypeError, ValueError):
+            body = repr(results)
+        if len(body) > MAX_EMAIL_RETRIEVAL_JSON_CHARS:
+            body = (
+                body[:MAX_EMAIL_RETRIEVAL_JSON_CHARS]
+                + f"\n\n… truncated ({len(results)} rows; email size limit)"
+            )
+        sections.append(f"--- Retrieval results ({len(results)} rows) ---\n{body}")
+
+    if per_platform:
+        try:
+            plat = json.dumps(per_platform, indent=2, ensure_ascii=False, default=str)
+        except (TypeError, ValueError):
+            plat = repr(per_platform)
+        if len(plat) > MAX_EMAIL_RETRIEVAL_JSON_CHARS // 2:
+            plat = plat[: MAX_EMAIL_RETRIEVAL_JSON_CHARS // 2] + "\n… truncated"
+        sections.append(f"--- Per-platform ---\n{plat}")
+
+    if stage1:
+        try:
+            s1 = json.dumps(stage1, indent=2, ensure_ascii=False, default=str)
+        except (TypeError, ValueError):
+            s1 = repr(stage1)
+        if len(s1) > MAX_EMAIL_RETRIEVAL_JSON_CHARS // 2:
+            s1 = s1[: MAX_EMAIL_RETRIEVAL_JSON_CHARS // 2] + "\n… truncated"
+        sections.append(f"--- Stage 1 (hybrid) ---\n{s1}")
+
+    return "\n\n".join(sections) if sections else "(no retrieval rows stored for this message)"
 
 
 def _build_email_body(
@@ -52,6 +103,9 @@ def _build_email_body(
     cypher: Optional[str],
     comment: Optional[str],
     route_type: Optional[str],
+    retrieval_results: Optional[List[Dict[str, Any]]] = None,
+    per_platform: Optional[Dict[str, Any]] = None,
+    stage1: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Build a plain-text email body from feedback fields."""
     icon = "👍" if rating == "up" else "👎"
@@ -65,11 +119,18 @@ def _build_email_body(
         f"--- Question ---",
         question or "(not provided)",
         f"",
-        f"--- Answer ---",
+        f"--- Answer (summary) ---",
         answer or "(not provided)",
     ]
     if cypher:
         lines += ["", "--- Generated Cypher ---", cypher]
+
+    retrieval_block = _format_retrieval_results_for_email(
+        retrieval_results, per_platform=per_platform, stage1=stage1
+    )
+    if route_type in ("media_retrieval", "hybrid_media") or retrieval_results:
+        lines += ["", retrieval_block]
+
     if comment:
         lines += ["", "--- User Comment ---", comment]
     return "\n".join(lines)
@@ -112,11 +173,25 @@ async def send_feedback_email(
     cypher: Optional[str] = None,
     comment: Optional[str] = None,
     route_type: Optional[str] = None,
+    retrieval_results: Optional[List[Dict[str, Any]]] = None,
+    per_platform: Optional[Dict[str, Any]] = None,
+    stage1: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Send a feedback notification email asynchronously (fire-and-forget)."""
     icon = "👍" if rating == "up" else "👎"
     subject = f"[GraphRAG Feedback] {icon} {rating.upper()} from {username}"
-    body = _build_email_body(rating, username, question, answer, cypher, comment, route_type)
+    body = _build_email_body(
+        rating,
+        username,
+        question,
+        answer,
+        cypher,
+        comment,
+        route_type,
+        retrieval_results=retrieval_results,
+        per_platform=per_platform,
+        stage1=stage1,
+    )
 
     loop = asyncio.get_event_loop()
     try:

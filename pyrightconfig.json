@@ -1,0 +1,9 @@
+{
+  "include": ["backend", "ai", "utils"],
+  "exclude": ["**/node_modules", "**/.venv", "**/venv"],
+  "venvPath": ".",
+  "venv": ".venv",
+  "pythonVersion": "3.11",
+  "typeCheckingMode": "basic",
+  "extraPaths": ["."]
+}
