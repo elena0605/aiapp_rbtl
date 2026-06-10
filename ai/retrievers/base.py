@@ -52,6 +52,22 @@ except Exception:
 
 logger = logging.getLogger("MediaRetrievers")
 
+_INVALID_MEDIA_THEMES = frozenset(
+    {"?", "??", "...", "unknown", "n/a", "none", "null", "undefined"}
+)
+
+
+def is_valid_media_theme(theme: Optional[str]) -> bool:
+    """Return False for empty, placeholder, or junk themes from a bad LLM parse."""
+    if theme is None:
+        return False
+    text = str(theme).strip()
+    if len(text) < 2:
+        return False
+    if text.lower() in _INVALID_MEDIA_THEMES:
+        return False
+    return True
+
 
 # ── Env-driven defaults ──────────────────────────────────────────────────────
 

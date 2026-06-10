@@ -121,12 +121,22 @@ template: |
        - "how many creators ..." → RETURN count(DISTINCT influencer) AS creator_count,
          [n IN collect(DISTINCT toString(influencer.name))
           WHERE n IS NOT NULL AND trim(n) <> '' | n] AS creator_names
-       - "how many videos ..."   → RETURN count(DISTINCT v) AS video_count
-       - "which creators ..."    → RETURN creator info (name, channel_id/username, etc.) DISTINCT.
-         Do NOT add LIMIT or SKIP — return every graph match in the candidate pool.
+       - "how many videos ..."   → RETURN count(DISTINCT v) AS video_count,
+         [item IN collect(DISTINCT {video_id: v.video_id,
+          title: coalesce(v.video_title, toString(v.video_id)), url: v.video_url})
+          WHERE item.title IS NOT NULL AND trim(toString(item.title)) <> '' | item]
+          AS video_samples
+       - "which creators ..."    → RETURN DISTINCT toString(influencer.name) AS creator_name,
+         acc.channel_id AS channel_id, acc.username AS tiktok_username,
+         CASE WHEN acc:YouTubeChannel THEN 'youtube' WHEN acc:TikTokUser THEN 'tiktok'
+         ELSE 'unknown' END AS platform.
+         Do NOT use acc.display_name, acc.follower_count on YouTubeChannel
+         (use acc.title and acc.subscriber_count for YouTube; acc.display_name and
+         acc.follower_count only on TikTokUser). Do NOT add LIMIT or SKIP.
        - "show me videos ..."    → RETURN video info DISTINCT (no LIMIT).
          Use these aliases: v.video_id AS video_id, v.video_title AS title,
-         v.video_url AS url, creator display name AS creator, and
+         v.video_url AS url, CASE WHEN acc:YouTubeChannel THEN acc.title
+         WHEN acc:TikTokUser THEN acc.username END AS creator, and
          'youtube'/'tiktok' AS platform (from acc label).
      Do NOT add LIMIT, SKIP, or ORDER BY unless the user explicitly asks to rank
      by a structural metric (e.g. "most followed"). Stage 1 already ranked

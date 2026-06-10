@@ -42,6 +42,7 @@ from utils.neo4j import get_session  # type: ignore
 from ai.llmops.langfuse_client import create_completion  # type: ignore
 
 from .base import (
+    is_valid_media_theme,
     MEDIA_RETRIEVER_AUTO_BROADEN,
     MEDIA_RETRIEVER_DEDUP_INFLUENCERS,
     MEDIA_RETRIEVER_DEFAULT_PLATFORM,
@@ -72,24 +73,24 @@ _COUNT_TO_RANKED_SUFFIX: Dict[str, str] = {
 }
 
 INFLUENCER_MAP_CYPHER = """
-MATCH (inf:Influencer)
-OPTIONAL MATCH (inf)-[:HAS_ACCOUNT]->(c:YouTubeChannel)
-WITH inf,
+MATCH (influencer:Influencer)
+OPTIONAL MATCH (influencer)-[:HAS_ACCOUNT]->(c:YouTubeChannel)
+WITH influencer,
      collect(DISTINCT c.channel_id) AS yt_channel_ids,
      collect(DISTINCT c.title) AS yt_titles
-OPTIONAL MATCH (inf)-[:HAS_ACCOUNT]->(u:TikTokUser)
-WITH inf,
+OPTIONAL MATCH (influencer)-[:HAS_ACCOUNT]->(u:TikTokUser)
+WITH influencer,
      yt_channel_ids,
      yt_titles,
      collect(DISTINCT u.username) AS tt_usernames_list
-WHERE (size($yt_creator_names) > 0 AND inf.youtube_username IN $yt_creator_names)
-   OR (size($tt_usernames) > 0 AND inf.tiktok_username IN $tt_usernames)
+WHERE (size($yt_creator_names) > 0 AND influencer.youtube_username IN $yt_creator_names)
+   OR (size($tt_usernames) > 0 AND influencer.tiktok_username IN $tt_usernames)
    OR (size($yt_channel_ids) > 0 AND any(cid IN yt_channel_ids WHERE cid IN $yt_channel_ids))
    OR (size($yt_creator_names) > 0 AND any(t IN yt_titles WHERE t IN $yt_creator_names))
    OR (size($tt_usernames) > 0 AND any(un IN tt_usernames_list WHERE un IN $tt_usernames))
-RETURN inf.name AS influencer_name,
-       inf.youtube_username AS youtube_username,
-       inf.tiktok_username AS tiktok_username,
+RETURN influencer.name AS influencer_name,
+       influencer.youtube_username AS youtube_username,
+       influencer.tiktok_username AS tiktok_username,
        yt_channel_ids,
        yt_titles,
        tt_usernames_list
@@ -228,10 +229,11 @@ class MediaRetrievalAgent:
         platform = selection["platform"]
         sel_inputs = selection["inputs"] or {}
         theme = sel_inputs.get("theme") or ""
-        if not theme:
+        if not is_valid_media_theme(theme):
             raise MediaRetrievalAgentError(
                 "No theme could be extracted from the question; ask the user "
-                "to specify what topic/content they want to search for."
+                "to specify what topic/content they want to search for "
+                "(e.g. gaming, vaping, gambling)."
             )
 
         if retriever_name not in self._configs:
@@ -275,7 +277,7 @@ class MediaRetrievalAgent:
             }
             if mode == "candidates":
                 selection = self._apply_hybrid_platform_defaults(question, selection)
-            return selection
+            return self._finalize_selection_theme(selection, question)
 
         selected: Optional[Dict[str, Any]] = None
         if self._use_llm_selector:
@@ -303,7 +305,32 @@ class MediaRetrievalAgent:
         selected["platform"] = platform
         if mode == "candidates":
             selected = self._apply_hybrid_platform_defaults(question, selected)
-        return selected
+        return self._finalize_selection_theme(selected, question)
+
+    def _resolve_theme(self, theme: Optional[str], question: str) -> Optional[str]:
+        if is_valid_media_theme(theme):
+            return str(theme).strip()
+        fallback = self._extract_theme_fallback(question)
+        if is_valid_media_theme(fallback):
+            logger.info(
+                "MediaRetrievalAgent: replaced invalid theme %r with fallback %r",
+                theme,
+                fallback,
+            )
+            return str(fallback).strip()
+        return None
+
+    def _finalize_selection_theme(
+        self, selection: Dict[str, Any], question: str
+    ) -> Dict[str, Any]:
+        inputs = dict(selection.get("inputs") or {})
+        resolved = self._resolve_theme(inputs.get("theme"), question)
+        if resolved:
+            inputs["theme"] = resolved
+        else:
+            inputs.pop("theme", None)
+        selection["inputs"] = inputs
+        return selection
 
     def _question_mentions_platform(self, question: str, platform: str) -> bool:
         """Detect platform mentions without substring false positives (e.g. ``tt`` in Rotterdam)."""
@@ -418,13 +445,23 @@ class MediaRetrievalAgent:
             )
         return "\n".join(lines)
 
-    def _examples_text(self) -> str:
+    def _examples_text(self, mode: str = "default") -> str:
         ex = self._load_examples()
-        rows = ex.get("media_retrieval_examples") or []
+        rows: List[Dict[str, Any]] = list(ex.get("media_retrieval_examples") or [])
+        if mode == "candidates":
+            for row in ex.get("hybrid_media_examples") or []:
+                rows.append(
+                    {
+                        "question": row.get("question"),
+                        "retriever": row.get("stage1_retriever"),
+                        "platform": row.get("platform", "all"),
+                        "theme": row.get("theme"),
+                    }
+                )
         if not rows:
             return ""
         out_lines: List[str] = []
-        for row in rows[:16]:
+        for row in rows[:20]:
             out_lines.append(
                 f"- Question: {row.get('question')}\n"
                 f"  -> retriever={row.get('retriever')}, platform={row.get('platform', 'all')}, "
@@ -436,7 +473,7 @@ class MediaRetrievalAgent:
         self, question: str, *, mode: str
     ) -> Optional[Dict[str, Any]]:
         catalog = self._catalog_text(mode)
-        examples = self._examples_text()
+        examples = self._examples_text(mode)
 
         prompt = f"""You are a router that picks the best MEDIA RETRIEVER for a user
 question about YouTube and TikTok creators, videos, and audience comment topics.
@@ -455,8 +492,10 @@ Rules:
 1. Extract a CLEAN theme — the topic/content being asked about. Strip phrases
    like "in Rotterdam Centrum", "among 15-year-olds", "for boys", "in Feijenoord"
    from the theme; those are STRUCTURAL filters, not part of the semantic theme.
-   The theme is what we will embed; it should match how creators or commenters
-   would describe the content (a short noun phrase or topic).
+   When the question ends with "... for <topic>" (e.g. "... for gaming"), the
+   theme is that trailing topic — not the whole question. The theme is what we
+   will embed; it should match how creators or commenters would describe the
+   content (a short noun phrase or topic).
 2. Pick the platform: "youtube" / "tiktok" if the user explicitly mentioned it;
    otherwise "all" to run both.
 3. Pick a retriever family that matches the user's question kind:
@@ -547,6 +586,7 @@ User question: {question}
     }
 
     _THEME_PATTERNS = [
+        re.compile(r"\bfor\s+(.+?)(?:\?|$)", re.IGNORECASE),
         re.compile(r"\babout\s+(.+?)(?:\?|$|,|\s+in\s+|\s+among\s+|\s+for\s+)", re.IGNORECASE),
         re.compile(r"\bdiscuss(?:ing|es|ed)?\s+(.+?)(?:\?|$|,|\s+in\s+|\s+among\s+|\s+for\s+)", re.IGNORECASE),
         re.compile(r"\btalk(?:ing|s|ed)?\s+about\s+(.+?)(?:\?|$|,|\s+in\s+|\s+among\s+|\s+for\s+)", re.IGNORECASE),

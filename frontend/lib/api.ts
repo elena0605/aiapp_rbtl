@@ -150,7 +150,7 @@ export async function sendMessage(
     },
     {
       signal,
-      timeout: 180_000,
+      timeout: 300_000,
     }
   )
   return response.data

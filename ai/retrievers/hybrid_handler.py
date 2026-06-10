@@ -175,6 +175,163 @@ def _extract_geo_from_question(question: str) -> tuple[Optional[str], Optional[s
     return matched_area, matched_muni
 
 
+_NON_GEO_STRUCTURAL_PATTERNS = (
+    re.compile(r"\bgirls?\b", re.IGNORECASE),
+    re.compile(r"\bboys?\b", re.IGNORECASE),
+    re.compile(r"\bfemales?\b", re.IGNORECASE),
+    re.compile(r"\bmales?\b", re.IGNORECASE),
+    re.compile(r"\bwomen\b", re.IGNORECASE),
+    re.compile(r"\bmen\b", re.IGNORECASE),
+    re.compile(r"\b\d{1,2}\s*-?\s*year[- ]?olds?\b", re.IGNORECASE),
+    re.compile(r"\bage\s*[=:]?\s*\d", re.IGNORECASE),
+    re.compile(r"\bteen(?:agers?|s)?\b", re.IGNORECASE),
+)
+
+
+def _question_needs_non_geo_structural_filter(question: str) -> bool:
+    """True when Stage 2 must filter on demographics beyond area/municipality."""
+    return any(pat.search(question) for pat in _NON_GEO_STRUCTURAL_PATTERNS)
+
+
+def _person_properties_from_terminology() -> Dict[str, Any]:
+    data = load_terminology("v1") or {}
+    return (data.get("properties") or {}).get("Person") or {}
+
+
+def _extract_person_attribute_filter(question: str) -> Optional[tuple[str, str]]:
+    """Map survey-style phrases to (Person property, canonical terminology value)."""
+    q_lower = question.lower()
+    phrase_map = (
+        (r"\b(?:who\s+)?(?:have|has)\s+mental\s+health\s+issues?\b", "has_mental_health_issues", "Yes"),
+        (r"\b(?:among\s+)?people\s+(?:who\s+)?(?:have|has)\s+mental\s+health\s+issues?\b", "has_mental_health_issues", "Yes"),
+        (r"\bwith\s+mental\s+health\s+issues?\b", "has_mental_health_issues", "Yes"),
+        (r"\b(?:game|gaming)\s+almost\s+every\s+day\b", "gaming_frequency", "(Almost) every day"),
+        (r"\b(?:game|gaming)\s+(?:4|four)\s+or\s+5\s+days\b", "gaming_frequency", "4 or 5 days per week"),
+        (r"\bvap(?:e|ing)\s+almost\s+every\s+day\b", "vaping_frequency", "(Almost) every day"),
+        (r"\bsmok(?:e|ing)\s+every\s+day\b", "smoking_frequency", "Every day"),
+        (r"\bhandle\s+stress\s+well\b", "handles_stress_well", "Yes, does not find it difficult"),
+        (r"\b(?:are|who\s+are)\s+often\s+lonely\b", "often_lonely", "Often / (Almost) always"),
+    )
+    for pattern, prop, value in phrase_map:
+        if re.search(pattern, q_lower):
+            return prop, value
+
+    person = _person_properties_from_terminology()
+    for prop, spec in person.items():
+        if not isinstance(spec, dict) or prop.startswith("_"):
+            continue
+        for value in spec.get("values") or []:
+            if isinstance(value, str) and value.lower() in q_lower:
+                return prop, value
+    return None
+
+
+def person_attribute_human_label(prop: str, value: str) -> str:
+    """Plain-language label for a Person structural filter."""
+    if prop == "has_mental_health_issues" and value == "Yes":
+        return "people with mental health issues"
+    if prop == "handles_stress_well":
+        return "people who handle stress well"
+    if prop == "gaming_frequency":
+        return f"people who game ({value.lower()})"
+    if prop == "often_lonely":
+        return "people who are often lonely"
+    return f"people with {prop.replace('_', ' ')} = {value}"
+
+
+def _structural_filter_dimensions(question: str) -> int:
+    """Count independent structural filters (geo, person attribute, gender/age)."""
+    dims = 0
+    area, municipality = _extract_geo_from_question(question)
+    if area or municipality:
+        dims += 1
+    if _extract_person_attribute_filter(question):
+        dims += 1
+    if _question_needs_non_geo_structural_filter(question):
+        dims += 1
+    return dims
+
+
+def _can_use_structural_template(question: str) -> bool:
+    """Deterministic Stage 2 for geo and/or survey Person filters (not gender/age combos)."""
+    if _question_needs_non_geo_structural_filter(question):
+        return False
+    area, municipality = _extract_geo_from_question(question)
+    has_geo = bool(area or municipality)
+    has_person = _extract_person_attribute_filter(question) is not None
+    return has_geo or has_person
+
+
+def _person_attribute_where_clause(prop: str, value: str) -> str:
+    return f"p.{prop} = '{_escape_cypher_literal(value)}'"
+
+
+def _municipality_person_geo_prefix_with_attr(
+    municipality_name: str, attr_clause: Optional[str] = None
+) -> str:
+    escaped = _escape_cypher_literal(municipality_name)
+    geo_exists = (
+        "EXISTS {\n"
+        f"  MATCH (p)-[:LIVES_IN_MUNICIPALITY]->(:Municipality "
+        f"{{municipality_name: '{escaped}'}})\n"
+        "} OR EXISTS {\n"
+        f"  MATCH (p)-[:LIVES_IN_AREA]->(:Area)-[:BELONGS_TO]->(:Municipality "
+        f"{{municipality_name: '{escaped}'}})\n"
+        "}"
+    )
+    if attr_clause:
+        return (
+            "MATCH (p:Person)\n"
+            f"WHERE ({geo_exists})\n"
+            f"  AND {attr_clause}\n"
+        )
+    return (
+        "MATCH (p:Person)\n"
+        f"WHERE {geo_exists}\n"
+    )
+
+
+def _person_structural_prefix(question: str) -> Optional[str]:
+    """MATCH/WHERE prefix for geo, person-attribute, or both combined."""
+    area_name, municipality_name = _extract_geo_from_question(question)
+    person_attr = _extract_person_attribute_filter(question)
+    attr_clause = (
+        _person_attribute_where_clause(person_attr[0], person_attr[1])
+        if person_attr
+        else None
+    )
+
+    if area_name:
+        prefix = (
+            "MATCH (p:Person)-[:LIVES_IN_AREA]->"
+            f"(:Area {{area_name: '{_escape_cypher_literal(area_name)}'}})\n"
+        )
+        if attr_clause:
+            prefix += f"WHERE {attr_clause}\n"
+        return prefix
+
+    if municipality_name:
+        return _municipality_person_geo_prefix_with_attr(
+            municipality_name, attr_clause
+        )
+
+    if attr_clause:
+        return f"MATCH (p:Person)\nWHERE {attr_clause}\n"
+    return None
+
+
+def _video_samples_return_clause() -> str:
+    """Aggregate title/url pairs for hybrid video count answers."""
+    return (
+        "[item IN collect(DISTINCT {"
+        "video_id: v.video_id, "
+        "title: coalesce(v.video_title, toString(v.video_id)), "
+        "url: v.video_url"
+        "}) WHERE item.title IS NOT NULL AND trim(toString(item.title)) <> '' | item] "
+        "AS video_samples"
+    )
+
+
 def _account_id_filter(has_yt: bool, has_tt: bool) -> str:
     parts: List[str] = []
     if has_yt:
@@ -194,22 +351,14 @@ def _build_template_structural_cypher(
     output_kind: str,
     candidate_counts: Dict[str, int],
 ) -> Optional[str]:
-    """Deterministic fallback for common geo + creator/video hybrid queries."""
-    area_name, municipality_name = _extract_geo_from_question(question)
-    if not area_name and not municipality_name:
+    """Deterministic fallback for geo and/or survey Person-attribute filters."""
+    person_prefix = _person_structural_prefix(question)
+    if not person_prefix:
         return None
 
     has_yt = candidate_counts.get("youtube_channel_ids", 0) > 0
     has_tt = candidate_counts.get("tiktok_usernames", 0) > 0
     has_videos = candidate_counts.get("video_ids", 0) > 0
-
-    if area_name:
-        geo_match = (
-            "MATCH (p:Person)-[:LIVES_IN_AREA]->"
-            f"(:Area {{area_name: '{_escape_cypher_literal(area_name)}'}})\n"
-        )
-    else:
-        geo_match = _municipality_person_geo_prefix(municipality_name or "")
 
     wants_count = (
         output_kind in {"count_creators", "count_videos"}
@@ -227,15 +376,13 @@ def _build_template_structural_cypher(
         )
         if wants_count:
             return (
-                geo_match
+                person_prefix
                 + video_path
                 + "RETURN count(DISTINCT v) AS video_count, "
-                + "[n IN collect(DISTINCT coalesce(v.video_title, v.video_id)) "
-                + "WHERE n IS NOT NULL AND trim(toString(n)) <> '' | toString(n)] "
-                + "AS video_titles"
+                + _video_samples_return_clause()
             )
         return (
-            geo_match
+            person_prefix
             + video_path
             + "RETURN DISTINCT\n"
             + "  v.video_id AS video_id,\n"
@@ -273,7 +420,7 @@ def _build_template_structural_cypher(
     account_filter = _account_id_filter(has_yt, has_tt)
     if wants_count:
         return (
-            geo_match
+            person_prefix
             + f"MATCH (p)-[:FOLLOWS]->({_INFLUENCER_CYPHER_VAR}:Influencer)"
             "-[:HAS_ACCOUNT]->(acc)\n"
             + f"WHERE {account_filter}\n"
@@ -283,7 +430,7 @@ def _build_template_structural_cypher(
         )
 
     return (
-        geo_match
+        person_prefix
         + f"MATCH (p)-[:FOLLOWS]->({_INFLUENCER_CYPHER_VAR}:Influencer)"
         "-[:HAS_ACCOUNT]->(acc)\n"
         + f"WHERE {account_filter}\n"
@@ -553,6 +700,27 @@ class HybridMediaHandler:
             len(stage2_params.get("video_ids") or []),
         )
 
+        # Single-dimension structural filters (geo OR gaming_frequency, etc.)
+        # can skip the slow Stage 2 LLM retry loop.
+        if _can_use_structural_template(question):
+            template_start = time.perf_counter()
+            template_result = self._try_template_stage2(
+                stage1=stage1,
+                question=question,
+                output_kind=output_kind,
+                candidate_counts=candidate_counts,
+                timings=timings,
+            )
+            timings["stage2_template_first"] = round(
+                time.perf_counter() - template_start, 3
+            )
+            if template_result is not None:
+                logger.info(
+                    "Stage 2 template-first structural Cypher (%d rows)",
+                    len(template_result.results),
+                )
+                return template_result
+
         # Loop with correction retries.
         loop = asyncio.get_event_loop()
         last_cypher: Optional[str] = None
@@ -726,6 +894,7 @@ class HybridMediaHandler:
             )
 
             rows = self._enrich_creator_count_rows(cypher, rows, stage2_params)
+            rows = self._enrich_video_count_rows(cypher, rows, stage2_params)
             if not rows:
                 template_result = self._try_template_stage2(
                     stage1=stage1,
@@ -835,6 +1004,7 @@ class HybridMediaHandler:
         timings["stage2_template_exec"] = round(time.perf_counter() - exec_start, 3)
 
         rows = self._enrich_creator_count_rows(cypher, rows, stage2_params)
+        rows = self._enrich_video_count_rows(cypher, rows, stage2_params)
         summary = self._summarize_stage2(stage1, rows, candidate_counts)
         return HybridMediaResult(
             retriever_name=f"{stage1.retriever_name}+structural_cypher",
@@ -878,6 +1048,55 @@ class HybridMediaHandler:
         )
 
     # ── Helpers ─────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _normalize_video_count_row(row: Dict[str, Any]) -> Dict[str, Any]:
+        """Ensure video_titles exists for summaries when video_samples is present."""
+        out = dict(row)
+        samples = out.get("video_samples") or []
+        if samples and not out.get("video_titles"):
+            out["video_titles"] = [
+                str(s.get("title")).strip()
+                for s in samples
+                if isinstance(s, dict) and s.get("title")
+            ]
+        return out
+
+    @staticmethod
+    def _enrich_video_count_rows(
+        cypher: str,
+        rows: List[Dict[str, Any]],
+        stage2_params: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        """Re-run count Cypher with video_samples when URLs were omitted."""
+        if not rows or len(rows) != 1 or "video_count" not in rows[0]:
+            return rows
+        row = rows[0]
+        samples = row.get("video_samples") or []
+        if isinstance(samples, list) and samples:
+            return [HybridMediaHandler._normalize_video_count_row(row)]
+
+        base = cypher.strip().rstrip(";")
+        if "video_samples" in base.lower():
+            return rows
+        samples_return = _video_samples_return_clause()
+        enriched = re.sub(
+            r"RETURN\s+count\s*\(\s*DISTINCT\s+v\s*\)\s+AS\s+video_count.*$",
+            f"RETURN count(DISTINCT v) AS video_count, {samples_return}",
+            base,
+            count=1,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if enriched == base:
+            return rows
+        try:
+            with get_session() as session:
+                record = run_neo4j_query(session, enriched, **stage2_params).single()
+            if record:
+                return [HybridMediaHandler._normalize_video_count_row(dict(record))]
+        except Exception as exc:
+            logger.warning("Could not enrich hybrid video samples: %s", exc)
+        return rows
 
     @staticmethod
     def _enrich_creator_count_rows(

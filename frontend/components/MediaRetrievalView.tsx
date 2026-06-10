@@ -600,6 +600,28 @@ function isCreatorResult(results: any[]): boolean {
   return !!(first.influencer_name || first.accounts || (first.creator && first.relevance != null && first.video_count != null))
 }
 
+function decodeHtmlEntities(text: string): string {
+  return text
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+}
+
+function videoSampleUrl(sample: {
+  url?: string
+  video_url?: string
+  video_id?: string
+}): string | undefined {
+  const direct = (sample.url || sample.video_url || '').trim()
+  if (direct) return direct
+  const id = sample.video_id ? String(sample.video_id) : ''
+  if (/^\d{15,}$/.test(id)) return `https://www.tiktok.com/video/${id}`
+  if (/^[\w-]{11}$/.test(id)) return `https://www.youtube.com/watch?v=${id}`
+  return undefined
+}
+
 function isHybridCountAnswer(results: any[]): boolean {
   return (
     results.length === 1 &&
@@ -620,6 +642,15 @@ function HybridCountAnswer({
 }) {
   const isVideoCount = typeof row.video_count === 'number'
   const count = isVideoCount ? row.video_count : (row.creator_count ?? 0)
+  const videoSamples = (
+    isVideoCount ? row.video_samples || [] : []
+  ).filter(
+    (s: unknown) =>
+      typeof s === 'object' &&
+      s !== null &&
+      typeof (s as { title?: string }).title === 'string' &&
+      (s as { title: string }).title.trim().length > 0
+  ) as Array<{ title: string; url?: string; video_url?: string; video_id?: string }>
   const names = (
     isVideoCount ? row.video_titles || [] : row.creator_names || []
   ).filter((n: unknown) => typeof n === 'string' && n.trim().length > 0) as string[]
@@ -653,11 +684,35 @@ function HybridCountAnswer({
             ? 'creator matches your question after the structural filter'
             : 'creators match your question after the structural filter'}
       </div>
-      {names.length > 0 ? (
+      {isVideoCount && videoSamples.length > 0 ? (
+        <ul className="space-y-1 text-sm text-gray-800">
+          {videoSamples.map((sample, idx) => {
+            const title = decodeHtmlEntities(sample.title.trim())
+            const url = videoSampleUrl(sample)
+            return (
+              <li key={sample.video_id || url || `${title}-${idx}`}>
+                {url ? (
+                  <a
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-start gap-1 font-medium text-indigo-600 hover:text-indigo-800 hover:underline"
+                  >
+                    <span>{title}</span>
+                    <ExternalLink size={12} className="shrink-0 mt-0.5" />
+                  </a>
+                ) : (
+                  <span className="font-medium">{title}</span>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+      ) : names.length > 0 ? (
         <ul className="space-y-1 text-sm text-gray-800">
           {names.map((name) => (
             <li key={name} className="font-medium">
-              {name}
+              {decodeHtmlEntities(name)}
             </li>
           ))}
         </ul>

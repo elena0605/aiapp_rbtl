@@ -12,7 +12,12 @@ import re
 from collections import Counter
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
-from .base import MEDIA_RETRIEVER_K_FLOOR, MEDIA_RETRIEVER_TOP_N, get_media_retriever_min_score
+from .base import (
+    MEDIA_RETRIEVER_K_FLOOR,
+    MEDIA_RETRIEVER_TOP_N,
+    get_media_retriever_min_score,
+    is_valid_media_theme,
+)
 
 if TYPE_CHECKING:
     from .base import RetrieverConfig
@@ -1553,16 +1558,33 @@ def _hybrid_entity_label(
     return "creators" if plural else "creator"
 
 
+def _person_survey_label(question: str) -> Optional[str]:
+    from .hybrid_handler import (
+        _extract_person_attribute_filter,
+        person_attribute_human_label,
+    )
+
+    person_attr = _extract_person_attribute_filter(question)
+    if not person_attr:
+        return None
+    return person_attribute_human_label(person_attr[0], person_attr[1])
+
+
 def _structural_filter_label(question: str) -> str:
     """Plain-language description of the structural part of a hybrid question."""
     demo = _demographic_label(question)
     geo = _match_geo_name(question)
+    survey = _person_survey_label(question)
     platform = _explicit_platform_label(question)
 
     if demo and geo:
         label = f"{demo} living in {geo}"
+    elif survey and geo:
+        label = f"{survey} living in {geo}"
     elif geo:
         label = f"people living in {geo}"
+    elif survey:
+        label = survey
     elif demo:
         label = demo
     else:
@@ -1692,6 +1714,14 @@ def build_hybrid_summary(
     retriever_name: Optional[str] = None,
 ) -> str:
     """User-facing summary for hybrid_media (deterministic)."""
+    if not is_valid_media_theme(theme):
+        return (
+            f"Could not extract a clear topic from your question "
+            f"(got {theme!r}). Name the theme explicitly, e.g. 'gaming' or "
+            f"'vaping', along with the location or audience filter "
+            f"(e.g. girls in IJsselmonde)."
+        )
+
     total_candidates = sum(candidate_counts.values()) if candidate_counts else 0
     structural = _structural_filter_label(question)
     video_output = _hybrid_targets_videos(retriever_name, question, candidate_counts)
