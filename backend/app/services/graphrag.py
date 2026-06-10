@@ -157,9 +157,23 @@ _SEMANTIC_THEME_SIGNALS = (
     "video about",
     "content about",
     "make content",
+    "post about",
+    "posting about",
+    "posts about",
+    "publish",
     "semantically",
     "commenters",
+    "influencers that",
+    "influencers who",
+    "creators that",
+    "creators who",
+    "creators make",
+    "following influencers",
+    "follow influencers",
 )
+
+# Match IntentRouter's low-confidence fallback (ai/agent/intent_router.py).
+_INTENT_ROUTER_CONFIDENCE_THRESHOLD = 0.5
 
 _STRUCTURAL_SIGNALS = (
     "followed",
@@ -201,8 +215,19 @@ def _is_pure_structural_question(question: str) -> bool:
         pass
     return any(
         signal in q_lower
-        for signal in ("followed", "follows", "followers", "live in", "living in")
+        for signal in ("followed", "follows", "followers", "following", "live in", "living in")
     )
+
+
+def _trust_classifier_media_intent(intent_result: Any) -> bool:
+    """Whether to keep media_retrieval / hybrid_media from the intent classifier.
+
+    Keyword heuristics cannot cover every phrasing (e.g. 'post about', 'following
+    influencers'). When the classifier is sufficiently confident, defer to it.
+    """
+    if intent_result.intent not in ("media_retrieval", "hybrid_media"):
+        return False
+    return intent_result.confidence >= _INTENT_ROUTER_CONFIDENCE_THRESHOLD
 
 
 def _llm_max_tokens(params: Dict[str, Any], *, default: int = 4096) -> int:
@@ -763,16 +788,29 @@ class GraphRAGService:
 
                 effective_q = intent_result.effective_question
 
-                if _is_pure_structural_question(effective_q) and intent_result.intent in (
-                    "media_retrieval",
-                    "hybrid_media",
+                if (
+                    _is_pure_structural_question(effective_q)
+                    and intent_result.intent in ("media_retrieval", "hybrid_media")
+                    and not _trust_classifier_media_intent(intent_result)
                 ):
                     logger.info(
                         "GraphRAG: overriding intent %s -> graph_query "
-                        "(pure structural question, no semantic theme)",
+                        "(pure structural question, classifier confidence %.2f)",
                         intent_result.intent,
+                        intent_result.confidence,
                     )
                     intent_result.intent = "graph_query"
+                elif (
+                    _is_pure_structural_question(effective_q)
+                    and intent_result.intent in ("media_retrieval", "hybrid_media")
+                    and _trust_classifier_media_intent(intent_result)
+                ):
+                    logger.info(
+                        "GraphRAG: keeping intent=%s (confidence=%.2f) despite "
+                        "structural keyword heuristics — trusting intent classifier",
+                        intent_result.intent,
+                        intent_result.confidence,
+                    )
 
                 # ── Off-topic ────────────────────────────────────────
                 if intent_result.intent == "off_topic":

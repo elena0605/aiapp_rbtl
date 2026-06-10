@@ -201,6 +201,29 @@ def _person_properties_from_terminology() -> Dict[str, Any]:
 def _extract_person_attribute_filter(question: str) -> Optional[tuple[str, str]]:
     """Map survey-style phrases to (Person property, canonical terminology value)."""
     q_lower = question.lower()
+    # Negations first — theme text may also mention "mental health".
+    negative_phrases = (
+        (
+            r"\b(?:do\s+not|don't|does\s+not|doesn't|did\s+not|didn't)\s+"
+            r"(?:report|have)\s+mental\s+health\s+issues?\b",
+            "has_mental_health_issues",
+            "No",
+        ),
+        (
+            r"\b(?:without|with\s+no)\s+mental\s+health\s+issues?\b",
+            "has_mental_health_issues",
+            "No",
+        ),
+        (
+            r"\b(?:who\s+)?(?:do\s+not|don't|does\s+not|doesn't)\s+have\s+mental\s+health\s+issues?\b",
+            "has_mental_health_issues",
+            "No",
+        ),
+    )
+    for pattern, prop, value in negative_phrases:
+        if re.search(pattern, q_lower):
+            return prop, value
+
     phrase_map = (
         (r"\b(?:who\s+)?(?:have|has)\s+mental\s+health\s+issues?\b", "has_mental_health_issues", "Yes"),
         (r"\b(?:among\s+)?people\s+(?:who\s+)?(?:have|has)\s+mental\s+health\s+issues?\b", "has_mental_health_issues", "Yes"),
@@ -230,6 +253,8 @@ def person_attribute_human_label(prop: str, value: str) -> str:
     """Plain-language label for a Person structural filter."""
     if prop == "has_mental_health_issues" and value == "Yes":
         return "people with mental health issues"
+    if prop == "has_mental_health_issues" and value == "No":
+        return "people without reported mental health issues"
     if prop == "handles_stress_well":
         return "people who handle stress well"
     if prop == "gaming_frequency":

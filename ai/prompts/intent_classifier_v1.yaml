@@ -61,6 +61,14 @@ template: |
      - "Which TikTok creators are most popular with girls in IJsselmonde for gaming?"
      - "For boys aged 14, which YouTubers make content about smoking?"
      - "In Charlois, how many videos discuss mental health in comments?"
+     - "In Rotterdam, among people who do not have mental health issues, how many creators they follow make content about mental health?"
+     - "Are people who do not report mental health issues in Rotterdam following influencers that post about mental health?"
+     - "Do girls in Feijenoord follow creators whose videos are about vaping?"
+
+  Wording flexibility: classify as hybrid_media whenever BOTH a semantic content/comment
+  theme AND a Person/Area/Municipality filter are present — regardless of question shape
+  (yes/no, "are people…", "post about", "following influencers", "make content", etc.).
+  Do NOT downgrade to graph_query just because the phrasing differs from the examples above.
 
   Examples that stay graph_query (structural, no semantic content/comment matching):
      - "How many persons live in Rotterdam Centrum?"
