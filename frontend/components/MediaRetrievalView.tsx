@@ -65,7 +65,12 @@ function rankingLabel(row: any): string {
 }
 
 function rankingValue(row: any): string {
-  return formatScore(row.ranking_value ?? row.relevance ?? row.score)
+  const raw = row.ranking_value ?? row.relevance ?? row.score
+  if (row.ranking_label === 'Survey followers' && raw != null && raw !== '') {
+    const num = Number(raw)
+    if (Number.isFinite(num)) return String(Math.round(num))
+  }
+  return formatScore(raw)
 }
 
 function matchedTopics(row: any): string[] {
@@ -87,6 +92,7 @@ function ScoreBreakdown({ breakdown }: { breakdown?: Record<string, unknown> }) 
     content_rrf: 'Content RRF rank',
     summary_rrf: 'Comment-summary RRF rank',
     topic_rrf: 'Topic RRF rank',
+    follower_count: 'Survey followers',
   }
   return (
     <div className="mb-3 rounded-lg border border-slate-200/70 bg-white/80 px-3 py-2">
@@ -276,7 +282,7 @@ function VideoCard({ row, rank, signal }: { row: any; rank: number; signal?: str
     row.username ||
     row.creator_id ||
     'Unknown creator'
-  const url = row.url || row.video_url
+  const url = resolveVideoUrl(row)
   const rankLabel = rankingLabel(row)
   const rankVal = rankingValue(row)
   const platform = row.platform
@@ -609,17 +615,59 @@ function decodeHtmlEntities(text: string): string {
     .replace(/&#39;/g, "'")
 }
 
-function videoSampleUrl(sample: {
+function resolveVideoUrl(row: {
   url?: string
   video_url?: string
-  video_id?: string
+  video_id?: string | number
+  platform?: string
+  username?: string
+  creator?: string
+  creator_name?: string
+  channel_id?: string
 }): string | undefined {
-  const direct = (sample.url || sample.video_url || '').trim()
+  const direct = (row.url || row.video_url || '').trim()
   if (direct) return direct
-  const id = sample.video_id ? String(sample.video_id) : ''
-  if (/^\d{15,}$/.test(id)) return `https://www.tiktok.com/video/${id}`
-  if (/^[\w-]{11}$/.test(id)) return `https://www.youtube.com/watch?v=${id}`
+
+  const id = row.video_id != null ? String(row.video_id).trim() : ''
+  if (!id) return undefined
+
+  const platform = (row.platform || '').toLowerCase()
+  const username = (row.username || row.creator || row.creator_name || '')
+    .trim()
+    .replace(/^@/, '')
+  const isTikTok =
+    platform === 'tiktok' ||
+    (/^\d{15,}$/.test(id) && !String(row.channel_id || '').startsWith('UC'))
+
+  if (isTikTok) {
+    if (username) return `https://www.tiktok.com/@${username}/video/${id}`
+    if (/^\d{15,}$/.test(id)) return `https://www.tiktok.com/video/${id}`
+  }
+
+  if (platform === 'youtube' || /^[\w-]{11}$/.test(id)) {
+    return `https://www.youtube.com/watch?v=${id}`
+  }
+
   return undefined
+}
+
+function videoSampleUrl(
+  sample: {
+    url?: string
+    video_url?: string
+    video_id?: string | number
+    platform?: string
+    username?: string
+    creator?: string
+  },
+  parent?: { username?: string; creator?: string; platform?: string }
+): string | undefined {
+  return resolveVideoUrl({
+    ...sample,
+    platform: sample.platform || parent?.platform,
+    username: sample.username || parent?.username,
+    creator: sample.creator || parent?.creator,
+  })
 }
 
 function isHybridCountAnswer(results: any[]): boolean {

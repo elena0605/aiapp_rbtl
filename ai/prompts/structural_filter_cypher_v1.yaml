@@ -78,13 +78,24 @@ template: |
          `inf` as the infinity constant, so `RETURN inf.name` fails validation.
          Use `influencer` (or `i`) instead.
        - videos / count_videos: MATCH to video nodes with video_id IN $video_ids.
+         Link acc via (acc)-[:HAS_VIDEO]->(v) or (v)<-[:HAS_VIDEO]-(acc) as needed.
+         Do NOT add acc.channel_id IN $youtube_channel_ids when Candidate IDs
+         summary lists video_ids only (empty youtube_channel_ids) — empty IN []
+         is always false. Seed from $video_ids only in that case.
      Combine YouTube and TikTok with OR in WHERE when both lists are non-empty.
   3. APPLY THE STRUCTURAL FILTER from the user question — geography
      (Person -[:LIVES_IN_AREA]-> Area, Person -[:LIVES_IN_MUNICIPALITY]-> Municipality,
      Area -[:BELONGS_TO]-> Municipality), person attributes (age, gender,
-     school_year, vaping_frequency, gaming_frequency, ...), or follower
-     demographics (Person -[:FOLLOWS]-> Influencer -[:HAS_ACCOUNT]-> Channel/User).
+     school_year, vaping_frequency, gaming_frequency, ...), income/wealth
+     (lowest/highest income_household_wealth_median across Area nodes), or
+     follower demographics (Person -[:FOLLOWS]-> Influencer -[:HAS_ACCOUNT]-> Channel/User).
      Use exact canonical values from the terminology mapping.
+     For income/wealth filters (e.g. lowest household wealth neighbourhoods):
+       MATCH (a_all:Area)
+       WITH min(a_all.income_household_wealth_median) AS area_income_threshold
+       MATCH (p:Person)-[:LIVES_IN_AREA]->(a:Area)
+       WHERE a.income_household_wealth_median = area_income_threshold
+     Use max(...) instead of min(...) when the question asks for highest/richest areas.
   4. JOIN candidates TO Persons via Influencer when the filter is person-side.
      Canonical pattern for area + creator count (copy this shape; substitute
      the area/municipality name and keep the OR account filter):
@@ -138,9 +149,20 @@ template: |
          v.video_url AS url, CASE WHEN acc:YouTubeChannel THEN acc.title
          WHEN acc:TikTokUser THEN acc.username END AS creator, and
          'youtube'/'tiktok' AS platform (from acc label).
+     When the user asks for popularity (popular, most popular, most followed,
+     top N, ranked), count DISTINCT survey Person nodes who follow each creator
+     through the FOLLOWS relationship and ORDER BY that count DESC:
+       WITH v, acc, influencer, count(DISTINCT p) AS follower_count
+       RETURN ... follower_count
+       ORDER BY follower_count DESC
+     Use f.follows_youtube = true / f.follows_tiktok = true when the question
+     names a single platform. This follower_count is survey-linked popularity
+     among the structural filter cohort — NOT acc.subscriber_count or
+     acc.follower_count on channel nodes.
      Do NOT add LIMIT, SKIP, or ORDER BY unless the user explicitly asks to rank
-     by a structural metric (e.g. "most followed"). Stage 1 already ranked
-     semantically; Stage 2 only filters by graph structure.
+     by a structural metric (e.g. "popular", "most followed"). Stage 1 already
+     ranked semantically; Stage 2 only filters by graph structure unless
+     popularity ranking is requested.
   8. PARAMETERIZED ONLY. Use the parameter names above; do not interpolate
      user values into the query string.
   9. Output ONLY the Cypher statement, no explanations or markdown fences.

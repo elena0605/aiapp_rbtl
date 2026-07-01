@@ -77,7 +77,65 @@ def _escape_cypher_literal(value: str) -> str:
 _INFLUENCER_CYPHER_VAR = "influencer"
 
 
-def _normalize_stage2_cypher(cypher: str) -> str:
+def _strip_empty_candidate_id_filters(
+    cypher: str,
+    stage2_params: Dict[str, Any],
+) -> str:
+    """Drop account-ID filters when Stage 1 did not supply those candidate lists.
+
+    Video-only Stage 1 (e.g. comment_discussions) often seeds ``$video_ids`` only.
+    LLM Cypher that still requires ``acc.channel_id IN $youtube_channel_ids`` with an
+    empty list makes ``IN []`` always false and yields a false zero-row result.
+    """
+    yt_ids = stage2_params.get("youtube_channel_ids") or []
+    tt_users = stage2_params.get("tiktok_usernames") or []
+    normalized = cypher
+
+    if not yt_ids:
+        yt_patterns = (
+            r"\(\s*acc:YouTubeChannel\s+AND\s+acc\.channel_id\s+IN\s+\$youtube_channel_ids\s*\)\s*OR\s*",
+            r"\s*OR\s*\(\s*acc:YouTubeChannel\s+AND\s+acc\.channel_id\s+IN\s+\$youtube_channel_ids\s*\)",
+            r"\(\s*acc:YouTubeChannel\s+AND\s+acc\.channel_id\s+IN\s+\$youtube_channel_ids\s*\)",
+            r"\n\s*WHERE\s+acc\.channel_id\s+IN\s+\$youtube_channel_ids\s*",
+            r"\bacc:YouTubeChannel\s+AND\s+acc\.channel_id\s+IN\s+\$youtube_channel_ids\b",
+            r"\bacc\.channel_id\s+IN\s+\$youtube_channel_ids\b",
+        )
+        for pattern in yt_patterns:
+            normalized = re.sub(pattern, "\n", normalized, flags=re.IGNORECASE)
+
+    if not tt_users:
+        tt_patterns = (
+            r"\(\s*acc:TikTokUser\s+AND\s+acc\.username\s+IN\s+\$tiktok_usernames\s*\)\s*OR\s*",
+            r"\s*OR\s*\(\s*acc:TikTokUser\s+AND\s+acc\.username\s+IN\s+\$tiktok_usernames\s*\)",
+            r"\(\s*acc:TikTokUser\s+AND\s+acc\.username\s+IN\s+\$tiktok_usernames\s*\)",
+            r"\n\s*WHERE\s+acc\.username\s+IN\s+\$tiktok_usernames\s*",
+            r"\bacc:TikTokUser\s+AND\s+acc\.username\s+IN\s+\$tiktok_usernames\b",
+            r"\bacc\.username\s+IN\s+\$tiktok_usernames\b",
+        )
+        for pattern in tt_patterns:
+            normalized = re.sub(pattern, "\n", normalized, flags=re.IGNORECASE)
+
+    normalized = re.sub(r"\bWHERE\s+AND\b", "WHERE", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\bWHERE\s+OR\b", "WHERE", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\(\s*OR\s+", "(", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\s+OR\s*\)", ")", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\bAND\s+OR\b", "OR", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\bOR\s+AND\b", "AND", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(
+        r"\n\s*WHERE\s*(?=\n(?:MATCH|WITH|RETURN)\b)",
+        "\n",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized)
+    return normalized.strip()
+
+
+def _normalize_stage2_cypher(
+    cypher: str,
+    *,
+    stage2_params: Optional[Dict[str, Any]] = None,
+) -> str:
     """Fix common Stage 2 LLM Cypher issues before validate/execute."""
     normalized = cypher.strip().rstrip(";")
     # Neo4j parses bare `inf` as the infinity constant in expressions, so
@@ -115,6 +173,8 @@ def _normalize_stage2_cypher(cypher: str) -> str:
         normalized,
         flags=re.IGNORECASE,
     )
+    if stage2_params:
+        normalized = _strip_empty_candidate_id_filters(normalized, stage2_params)
     return normalized
 
 
@@ -272,19 +332,38 @@ def _structural_filter_dimensions(question: str) -> int:
         dims += 1
     if _extract_person_attribute_filter(question):
         dims += 1
+    if _income_wealth_person_prefix(question):
+        dims += 1
     if _question_needs_non_geo_structural_filter(question):
         dims += 1
     return dims
 
 
+def question_wants_follower_ranking(question: str) -> bool:
+    """True when the user asks for popularity / most-followed ordering in survey data."""
+    if _hybrid_wants_count(question):
+        return False
+    return bool(
+        re.search(
+            r"\b("
+            r"popular|most\s+popular|most\s+followed|"
+            r"highest|top\s+\d+|rank(?:ed)?"
+            r")\b",
+            question,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _hybrid_wants_count(question: str) -> bool:
+    return bool(re.search(r"\bhow many\b", question, re.IGNORECASE))
+
+
 def _can_use_structural_template(question: str) -> bool:
-    """Deterministic Stage 2 for geo and/or survey Person filters (not gender/age combos)."""
+    """Deterministic Stage 2 for geo, income/wealth, and/or survey Person filters."""
     if _question_needs_non_geo_structural_filter(question):
         return False
-    area, municipality = _extract_geo_from_question(question)
-    has_geo = bool(area or municipality)
-    has_person = _extract_person_attribute_filter(question) is not None
-    return has_geo or has_person
+    return _person_structural_prefix(question) is not None
 
 
 def _person_attribute_where_clause(prop: str, value: str) -> str:
@@ -316,8 +395,48 @@ def _municipality_person_geo_prefix_with_attr(
     )
 
 
+def _income_wealth_person_prefix(question: str) -> Optional[str]:
+    """MATCH prefix for lowest/highest income_household_wealth_median areas."""
+    q = question.lower()
+    if not re.search(
+        r"\b("
+        r"income|wealth|household\s+wealth|socioeconomic|socio-economic|"
+        r"deprived|disadvantaged|poor(?:est)?|low-income|low\s+income"
+        r")\b",
+        q,
+    ):
+        return None
+    if re.search(
+        r"\b("
+        r"highest|richest|wealthiest|maximum|most\s+wealth|"
+        r"high(?:est)?\s+income"
+        r")\b",
+        q,
+    ):
+        agg = "max"
+    else:
+        agg = "min"
+    return (
+        "MATCH (a_all:Area)\n"
+        f"WITH {agg}(a_all.income_household_wealth_median) AS area_income_threshold\n"
+        "MATCH (p:Person)-[:LIVES_IN_AREA]->(a:Area)\n"
+        "WHERE a.income_household_wealth_median = area_income_threshold\n"
+    )
+
+
+def _follows_platform_predicate(question: str) -> Optional[str]:
+    q = question.lower()
+    yt = bool(re.search(r"\b(youtube|youtuber)s?\b", q))
+    tt = bool(re.search(r"\b(tiktok|tiktoker)s?\b", q))
+    if yt and not tt:
+        return "f.follows_youtube = true"
+    if tt and not yt:
+        return "f.follows_tiktok = true"
+    return None
+
+
 def _person_structural_prefix(question: str) -> Optional[str]:
-    """MATCH/WHERE prefix for geo, person-attribute, or both combined."""
+    """MATCH/WHERE prefix for geo, person-attribute, income/wealth, or combinations."""
     area_name, municipality_name = _extract_geo_from_question(question)
     person_attr = _extract_person_attribute_filter(question)
     attr_clause = (
@@ -342,7 +461,8 @@ def _person_structural_prefix(question: str) -> Optional[str]:
 
     if attr_clause:
         return f"MATCH (p:Person)\nWHERE {attr_clause}\n"
-    return None
+
+    return _income_wealth_person_prefix(question)
 
 
 def _video_samples_return_clause() -> str:
@@ -370,6 +490,169 @@ def _account_id_filter(has_yt: bool, has_tt: bool) -> str:
     return " OR ".join(parts)
 
 
+def _video_row_return_fields(*, include_follower_count: bool = False) -> str:
+    follower = ",\n  follower_count" if include_follower_count else ""
+    return (
+        "RETURN DISTINCT\n"
+        + "  v.video_id AS video_id,\n"
+        + "  v.video_title AS title,\n"
+        + "  v.video_title AS video_title,\n"
+        + "  v.video_url AS url,\n"
+        + "  v.video_url AS video_url,\n"
+        + "  CASE\n"
+        + "    WHEN acc:YouTubeChannel THEN acc.channel_id\n"
+        + "    WHEN acc:TikTokUser THEN acc.username\n"
+        + "    ELSE NULL\n"
+        + "  END AS creator_id,\n"
+        + "  CASE\n"
+        + "    WHEN acc:YouTubeChannel THEN acc.title\n"
+        + "    WHEN acc:TikTokUser THEN acc.username\n"
+        + "    ELSE NULL\n"
+        + "  END AS creator,\n"
+        + "  CASE\n"
+        + "    WHEN acc:YouTubeChannel THEN acc.title\n"
+        + "    WHEN acc:TikTokUser THEN acc.username\n"
+        + "    ELSE NULL\n"
+        + "  END AS creator_name,\n"
+        + "  CASE\n"
+        + "    WHEN acc:YouTubeChannel THEN 'youtube'\n"
+        + "    WHEN acc:TikTokUser THEN 'tiktok'\n"
+        + "    ELSE NULL\n"
+        + "  END AS platform"
+        + follower
+    )
+
+
+def _ranked_video_where_clauses(question: str) -> List[str]:
+    where_parts = ["v.video_id IN $video_ids"]
+    platform_pred = _follows_platform_predicate(question)
+    if platform_pred:
+        where_parts.append(platform_pred)
+    return where_parts
+
+
+def _sort_rows_by_follower_count(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _key(row: Dict[str, Any]) -> tuple[float, float]:
+        fc = row.get("follower_count")
+        fc_val = float(fc) if isinstance(fc, (int, float)) else -1.0
+        rel = row.get("relevance") or row.get("score") or row.get("fused_score")
+        rel_val = float(rel) if isinstance(rel, (int, float)) else 0.0
+        return (fc_val, rel_val)
+
+    return sorted(rows, key=_key, reverse=True)
+
+
+def _build_survey_follower_count_cypher(
+    question: str,
+    *,
+    by_video: bool,
+    has_yt: bool,
+    has_tt: bool,
+) -> Optional[str]:
+    person_prefix = _person_structural_prefix(question)
+    if not person_prefix:
+        return None
+    platform_pred = _follows_platform_predicate(question)
+
+    if by_video:
+        where_parts = _ranked_video_where_clauses(question)
+        return (
+            person_prefix
+            + f"MATCH (p)-[f:FOLLOWS]->({_INFLUENCER_CYPHER_VAR}:Influencer)"
+            "-[:HAS_ACCOUNT]->(acc)-[:HAS_VIDEO]->(v)\n"
+            + "WHERE " + " AND ".join(where_parts) + "\n"
+            + "RETURN v.video_id AS video_id, count(DISTINCT p) AS follower_count"
+        )
+
+    account_filter = _account_id_filter(has_yt, has_tt)
+    where_parts = [account_filter]
+    if platform_pred:
+        where_parts.append(platform_pred)
+    return (
+        person_prefix
+        + f"MATCH (p)-[f:FOLLOWS]->({_INFLUENCER_CYPHER_VAR}:Influencer)"
+        "-[:HAS_ACCOUNT]->(acc)\n"
+        + "WHERE " + " AND ".join(where_parts) + "\n"
+        + "RETURN acc.channel_id AS channel_id, "
+        + "acc.username AS tiktok_username, "
+        + "count(DISTINCT p) AS follower_count"
+    )
+
+
+def attach_survey_follower_counts(
+    question: str,
+    rows: List[Dict[str, Any]],
+    stage2_params: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    """Attach survey Person follower counts and sort when the question asks for popularity."""
+    if not rows or not question_wants_follower_ranking(question):
+        return rows
+    if rows and rows[0].get("count_field") is not None:
+        return rows
+
+    missing = [r for r in rows if r.get("follower_count") is None]
+    if not missing:
+        return _sort_rows_by_follower_count(rows)
+
+    has_videos = any(r.get("video_id") for r in rows)
+    has_yt = bool(stage2_params.get("youtube_channel_ids"))
+    has_tt = bool(stage2_params.get("tiktok_usernames"))
+    cypher = _build_survey_follower_count_cypher(
+        question,
+        by_video=has_videos,
+        has_yt=has_yt,
+        has_tt=has_tt,
+    )
+    if not cypher:
+        return rows
+
+    params = dict(stage2_params)
+    if has_videos:
+        params["video_ids"] = [
+            str(r["video_id"]) for r in rows if r.get("video_id") is not None
+        ]
+
+    try:
+        with get_session() as session:
+            count_rows = [
+                dict(r) for r in run_neo4j_query(session, cypher, **params)
+            ]
+    except Exception as exc:
+        logger.warning("Survey follower-count enrichment failed: %s", exc)
+        return rows
+
+    if has_videos:
+        counts = {
+            str(r["video_id"]): int(r["follower_count"])
+            for r in count_rows
+            if r.get("video_id") is not None and r.get("follower_count") is not None
+        }
+        for row in rows:
+            vid = str(row.get("video_id") or "")
+            if vid in counts:
+                row["follower_count"] = counts[vid]
+    else:
+        by_channel = {
+            str(r["channel_id"]): int(r["follower_count"])
+            for r in count_rows
+            if r.get("channel_id") and r.get("follower_count") is not None
+        }
+        by_username = {
+            str(r["tiktok_username"]): int(r["follower_count"])
+            for r in count_rows
+            if r.get("tiktok_username") and r.get("follower_count") is not None
+        }
+        for row in rows:
+            cid = row.get("channel_id")
+            uname = row.get("username") or row.get("tiktok_username")
+            if cid is not None and str(cid) in by_channel:
+                row["follower_count"] = by_channel[str(cid)]
+            elif uname is not None and str(uname) in by_username:
+                row["follower_count"] = by_username[str(uname)]
+
+    return _sort_rows_by_follower_count(rows)
+
+
 def _build_template_structural_cypher(
     *,
     question: str,
@@ -389,15 +672,27 @@ def _build_template_structural_cypher(
         output_kind in {"count_creators", "count_videos"}
         or re.search(r"\bhow many\b", question, re.IGNORECASE) is not None
     )
+    rank = question_wants_follower_ranking(question)
 
     if output_kind in {"count_videos", "videos"}:
         if not has_videos:
             return None
+        where_clause = "WHERE " + " AND ".join(_ranked_video_where_clauses(question)) + "\n"
+        if rank and not wants_count:
+            return (
+                person_prefix
+                + f"MATCH (p)-[f:FOLLOWS]->({_INFLUENCER_CYPHER_VAR}:Influencer)"
+                "-[:HAS_ACCOUNT]->(acc)-[:HAS_VIDEO]->(v)\n"
+                + where_clause
+                + f"WITH v, acc, {_INFLUENCER_CYPHER_VAR}, count(DISTINCT p) AS follower_count\n"
+                + _video_row_return_fields(include_follower_count=True)
+                + "\nORDER BY follower_count DESC"
+            )
         video_path = (
             f"MATCH (p)-[:FOLLOWS]->({_INFLUENCER_CYPHER_VAR}:Influencer)"
             "-[:HAS_ACCOUNT]->(acc)"
             "-[:HAS_VIDEO]->(v)\n"
-            "WHERE v.video_id IN $video_ids\n"
+            + where_clause
         )
         if wants_count:
             return (
@@ -406,36 +701,7 @@ def _build_template_structural_cypher(
                 + "RETURN count(DISTINCT v) AS video_count, "
                 + _video_samples_return_clause()
             )
-        return (
-            person_prefix
-            + video_path
-            + "RETURN DISTINCT\n"
-            + "  v.video_id AS video_id,\n"
-            + "  v.video_title AS title,\n"
-            + "  v.video_title AS video_title,\n"
-            + "  v.video_url AS url,\n"
-            + "  v.video_url AS video_url,\n"
-            + "  CASE\n"
-            + "    WHEN acc:YouTubeChannel THEN acc.channel_id\n"
-            + "    WHEN acc:TikTokUser THEN acc.username\n"
-            + "    ELSE NULL\n"
-            + "  END AS creator_id,\n"
-            + "  CASE\n"
-            + "    WHEN acc:YouTubeChannel THEN acc.title\n"
-            + "    WHEN acc:TikTokUser THEN acc.username\n"
-            + "    ELSE NULL\n"
-            + "  END AS creator,\n"
-            + "  CASE\n"
-            + "    WHEN acc:YouTubeChannel THEN acc.title\n"
-            + "    WHEN acc:TikTokUser THEN acc.username\n"
-            + "    ELSE NULL\n"
-            + "  END AS creator_name,\n"
-            + "  CASE\n"
-            + "    WHEN acc:YouTubeChannel THEN 'youtube'\n"
-            + "    WHEN acc:TikTokUser THEN 'tiktok'\n"
-            + "    ELSE NULL\n"
-            + "  END AS platform"
-        )
+        return person_prefix + video_path + _video_row_return_fields()
 
     if output_kind not in {"count_creators", "creators"}:
         return None
@@ -443,22 +709,43 @@ def _build_template_structural_cypher(
         return None
 
     account_filter = _account_id_filter(has_yt, has_tt)
+    platform_pred = _follows_platform_predicate(question)
+    creator_where_parts = [account_filter]
+    if platform_pred:
+        creator_where_parts.append(platform_pred)
+    creator_where = "WHERE " + " AND ".join(creator_where_parts) + "\n"
     if wants_count:
         return (
             person_prefix
             + f"MATCH (p)-[:FOLLOWS]->({_INFLUENCER_CYPHER_VAR}:Influencer)"
             "-[:HAS_ACCOUNT]->(acc)\n"
-            + f"WHERE {account_filter}\n"
+            + creator_where
             + f"RETURN count(DISTINCT {_INFLUENCER_CYPHER_VAR}) AS creator_count, "
             + f"[n IN collect(DISTINCT toString({_INFLUENCER_CYPHER_VAR}.name)) "
             + "WHERE n IS NOT NULL AND trim(n) <> '' | n] AS creator_names"
+        )
+
+    if rank:
+        return (
+            person_prefix
+            + f"MATCH (p)-[f:FOLLOWS]->({_INFLUENCER_CYPHER_VAR}:Influencer)"
+            "-[:HAS_ACCOUNT]->(acc)\n"
+            + creator_where
+            + f"WITH acc, {_INFLUENCER_CYPHER_VAR}, count(DISTINCT p) AS follower_count\n"
+            + f"RETURN DISTINCT toString({_INFLUENCER_CYPHER_VAR}.name) AS creator_name, "
+            + "acc.channel_id AS channel_id, "
+            + "acc.username AS tiktok_username, "
+            + "CASE WHEN acc:YouTubeChannel THEN 'youtube' "
+            + "WHEN acc:TikTokUser THEN 'tiktok' ELSE 'unknown' END AS platform, "
+            + "follower_count\n"
+            + "ORDER BY follower_count DESC"
         )
 
     return (
         person_prefix
         + f"MATCH (p)-[:FOLLOWS]->({_INFLUENCER_CYPHER_VAR}:Influencer)"
         "-[:HAS_ACCOUNT]->(acc)\n"
-        + f"WHERE {account_filter}\n"
+        + creator_where
         + f"RETURN DISTINCT toString({_INFLUENCER_CYPHER_VAR}.name) AS creator_name, "
         + "acc.channel_id AS channel_id, "
         + "acc.username AS tiktok_username, "
@@ -806,7 +1093,7 @@ class HybridMediaHandler:
                 lines_ = cypher.split("\n")
                 if len(lines_) >= 2:
                     cypher = "\n".join(lines_[1:-1] if lines_[-1].startswith("```") else lines_[1:])
-            cypher = _normalize_stage2_cypher(cypher)
+            cypher = _normalize_stage2_cypher(cypher, stage2_params=stage2_params)
             if not cypher:
                 # LLM signalled "no structural filter needed" — fall back.
                 logger.info(
@@ -920,6 +1207,7 @@ class HybridMediaHandler:
 
             rows = self._enrich_creator_count_rows(cypher, rows, stage2_params)
             rows = self._enrich_video_count_rows(cypher, rows, stage2_params)
+            rows = attach_survey_follower_counts(question, rows, stage2_params)
             if not rows:
                 template_result = self._try_template_stage2(
                     stage1=stage1,
@@ -1030,6 +1318,7 @@ class HybridMediaHandler:
 
         rows = self._enrich_creator_count_rows(cypher, rows, stage2_params)
         rows = self._enrich_video_count_rows(cypher, rows, stage2_params)
+        rows = attach_survey_follower_counts(question, rows, stage2_params)
         summary = self._summarize_stage2(stage1, rows, candidate_counts)
         return HybridMediaResult(
             retriever_name=f"{stage1.retriever_name}+structural_cypher",

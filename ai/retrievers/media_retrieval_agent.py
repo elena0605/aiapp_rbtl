@@ -1024,6 +1024,50 @@ User question: {question}
             deduped_by_influencer=bool(deduped_sample),
         )
 
+    @staticmethod
+    def _per_platform_limit(top_n: Optional[int]) -> int:
+        if top_n is not None and int(top_n) > 0:
+            return int(top_n)
+        return MEDIA_RETRIEVER_TOP_N
+
+    @staticmethod
+    def _ranked_row_score(row: Dict[str, Any]) -> float:
+        for key in ("relevance", "engagement_score", "score", "fused_score"):
+            val = row.get(key)
+            if val is not None:
+                try:
+                    return float(val)
+                except (TypeError, ValueError):
+                    continue
+        return 0.0
+
+    @classmethod
+    def _merge_cross_platform_ranked_rows(
+        cls,
+        yt_res: Optional[RetrieverResult],
+        tt_res: Optional[RetrieverResult],
+        *,
+        top_n: Optional[int],
+    ) -> List[Dict[str, Any]]:
+        """Keep up to ``top_n`` rows per platform, then merge for display."""
+        limit = cls._per_platform_limit(top_n)
+        yt_rows = sorted(
+            list(yt_res.results or []) if yt_res else [],
+            key=cls._ranked_row_score,
+            reverse=True,
+        )
+        tt_rows = sorted(
+            list(tt_res.results or []) if tt_res else [],
+            key=cls._ranked_row_score,
+            reverse=True,
+        )
+        if yt_rows and tt_rows:
+            rows = yt_rows[:limit] + tt_rows[:limit]
+        else:
+            rows = (yt_rows or tt_rows)[:limit]
+        rows.sort(key=cls._ranked_row_score, reverse=True)
+        return rows
+
     def _merge_creators(
         self,
         all_name: str,
@@ -1038,10 +1082,9 @@ User question: {question}
         tt_rows = tt_res.results if tt_res else []
 
         if not MEDIA_RETRIEVER_DEDUP_INFLUENCERS or not (yt_rows and tt_rows):
-            merged = list(yt_rows) + list(tt_rows)
-            merged.sort(key=lambda r: float(r.get("relevance") or 0), reverse=True)
-            if top_n:
-                merged = merged[:top_n]
+            merged = self._merge_cross_platform_ranked_rows(
+                yt_res, tt_res, top_n=top_n
+            )
             return self._build_merged_creators(
                 all_name, theme, top_n, merged, yt_res, tt_res, chosen,
                 deduped=False,
@@ -1210,26 +1253,9 @@ User question: {question}
         tt_res: Optional[RetrieverResult],
         chosen: RetrieverConfig,
     ) -> MediaRetrievalResult:
-        rows = []
-        if yt_res:
-            rows.extend(yt_res.results)
-        if tt_res:
-            rows.extend(tt_res.results)
-
-        # Sort by a uniform score so cross-platform videos are comparable.
-        def _score(r: Dict[str, Any]) -> float:
-            for k in ("relevance", "engagement_score", "score", "fused_score"):
-                v = r.get(k)
-                if v is not None:
-                    try:
-                        return float(v)
-                    except (TypeError, ValueError):
-                        continue
-            return 0.0
-
-        rows.sort(key=_score, reverse=True)
-        if top_n:
-            rows = rows[:top_n]
+        rows = self._merge_cross_platform_ranked_rows(
+            yt_res, tt_res, top_n=top_n
+        )
         status = "ok" if rows else "empty"
         suggested = (
             (yt_res.suggested_actions if yt_res else None)

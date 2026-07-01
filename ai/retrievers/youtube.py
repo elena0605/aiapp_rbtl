@@ -928,6 +928,61 @@ def fetch_creator_rows_for_channel_ids(
     return results
 
 
+_VIDEO_SCORES_BY_IDS_CYPHER = """
+CALL db.index.vector.queryNodes($index, $k, $q) YIELD node AS v, score
+WHERE score >= $min_score AND v.video_id IN $video_ids
+RETURN v.video_id AS video_id, score
+"""
+
+
+def fetch_video_rows_for_video_ids(
+    config: RetrieverConfig,
+    theme: str,
+    video_ids: List[str],
+    *,
+    min_score: Optional[float] = None,
+) -> Dict[str, Dict[str, Any]]:
+    """Per-video metadata and semantic score for hybrid Stage 2 UI hydration."""
+    ids = list(dict.fromkeys(str(v) for v in video_ids if v))
+    if not ids:
+        return {}
+
+    with get_session() as session:
+        rows = [
+            _safe_dict(r)
+            for r in run_neo4j_query(session, _UNIFIED_HYDRATE, video_ids=ids)
+        ]
+        scores: Dict[str, float] = {}
+        if config.signal in {"comment_summary", "content"}:
+            ctx = prepare_query(config, theme, explicit_min_score=min_score)
+            for rec in run_neo4j_query(
+                session,
+                _VIDEO_SCORES_BY_IDS_CYPHER,
+                index=config.index_name,
+                q=ctx["embedding"],
+                k=ctx["k"],
+                min_score=ctx["min_score"],
+                video_ids=ids,
+            ):
+                row = _safe_dict(rec)
+                vid = row.get("video_id")
+                if vid is not None and row.get("score") is not None:
+                    scores[str(vid)] = float(row["score"])
+
+    out: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        vid = row.get("video_id")
+        if vid is None:
+            continue
+        key = str(vid)
+        row["platform"] = PLATFORM
+        if key in scores:
+            row["score"] = scores[key]
+            row["relevance"] = scores[key]
+        out[key] = row
+    return out
+
+
 def collect_threshold_candidate_ids(
     config: RetrieverConfig,
     theme: str,

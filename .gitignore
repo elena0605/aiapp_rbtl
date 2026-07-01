@@ -52,3 +52,6 @@ logs/
 # MkDocs build output
 site/
 
+# Batch eval results (regenerated locally)
+batch_eval/output/
+

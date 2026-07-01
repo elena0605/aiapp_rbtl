@@ -28,7 +28,7 @@ from backend.app.services.chat_message_payloads import (
 
 logger = logging.getLogger(__name__)
 
-TEST_USERNAMES = ["bojan", "roel", "famke", "scarlett"]
+TEST_USERNAMES = ["bojan", "roel", "famke", "scarlett", "batch"]
 _ALLOWED_USERNAMES = {name.lower() for name in TEST_USERNAMES}
 
 

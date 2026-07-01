@@ -1,0 +1,29 @@
+# Theme groupings for merge_themes.py
+# Keyword strings must match campaign.md exactly (not output folder slugs).
+
+violence:
+  - violence
+  - gore
+  - exposing
+  - blood
+  - crashes
+  - assasinations
+  - fights
+  - war
+
+online_hate_and_bullying:
+  - hate speech
+  - discrimination
+  - online hate
+  - bullying
+
+food:
+  - mukbangs
+  - meal preping
+  - healthy food
+  - unhealthy food
+  - healthy snack
+  - baking
+  - meals
+  - recipes
+  - ASMR food
