@@ -23,7 +23,14 @@ _PROMPT_INJECTION_PATTERNS = [
     re.compile(r"pretend\s+you\s+are\s+", re.I),
     re.compile(r"system\s*:\s*", re.I),
     re.compile(r"\brole\s*:\s*(system|admin)", re.I),
-    re.compile(r"(WRITE|CREATE|DELETE|MERGE|SET|REMOVE|DROP)\s+", re.I),
+]
+
+# Match Cypher write syntax, not everyday verbs ("create videos", "set up", "remove").
+_CYPHER_WRITE_PATTERNS = [
+    re.compile(r"\b(CREATE|MERGE|DELETE|REMOVE|DROP)\s*[\(\{]", re.I),
+    re.compile(r"\bDETACH\s+DELETE\b", re.I),
+    re.compile(r"\bSET\s+\w+(\.\w+)?\s*(\+)?=", re.I),
+    re.compile(r"(?:^|[;\n])\s*(CREATE|DELETE|MERGE|MATCH|RETURN|UNWIND|CALL)\s+", re.M | re.I),
 ]
 
 _SENSITIVE_DATA_PATTERNS = [
@@ -72,7 +79,7 @@ def check(question: str) -> GuardrailResult:
             category="length",
         )
 
-    for pattern in _PROMPT_INJECTION_PATTERNS:
+    for pattern in _PROMPT_INJECTION_PATTERNS + _CYPHER_WRITE_PATTERNS:
         if pattern.search(question):
             logger.warning(
                 "Guardrail: prompt injection pattern detected: %s",
