@@ -8,22 +8,26 @@ Also enforces read-only queries to prevent write operations.
 import os
 import re
 import logging
-from typing import Dict, Any, Optional, Tuple, List
+from typing import Any, Dict, List, Optional, Tuple, Type
 from functools import lru_cache
 
 from utils.neo4j import get_driver, get_default_database
 
 logger = logging.getLogger(__name__)
 
-# Try to import CyVer, but handle gracefully if not installed
+# Optional dependency (GitLab / Docker). May be missing in local IDE envs.
 try:
-    from CyVer import SyntaxValidator, SchemaValidator, PropertiesValidator
+    from CyVer import (  # type: ignore[import-not-found]
+        SyntaxValidator,
+        SchemaValidator,
+        PropertiesValidator,
+    )
     CYVER_AVAILABLE = True
 except ImportError:
     CYVER_AVAILABLE = False
-    SyntaxValidator = None
-    SchemaValidator = None
-    PropertiesValidator = None
+    SyntaxValidator: Type[Any] | None = None
+    SchemaValidator: Type[Any] | None = None
+    PropertiesValidator: Type[Any] | None = None
     logger.warning(
         "CyVer library not available. Cypher validation will be skipped. "
         "Install with: pip install CyVer"
@@ -150,7 +154,11 @@ class CypherValidator:
             raise RuntimeError(
                 "CyVer library is not installed. Install with: pip install CyVer"
             )
-        
+        if SyntaxValidator is None or SchemaValidator is None or PropertiesValidator is None:
+            raise RuntimeError(
+                "CyVer library is not installed. Install with: pip install CyVer"
+            )
+
         self.driver = driver or get_driver()
         self.database_name = database_name or get_default_database()
         
@@ -348,7 +356,7 @@ class CypherValidator:
         explain_query = f"EXPLAIN {query}"
         try:
             _records, summary, _keys = self.driver.execute_query(
-                explain_query,
+                explain_query,  # type: ignore[arg-type]
                 parameters=parameters,
                 database_=database_name,
             )
